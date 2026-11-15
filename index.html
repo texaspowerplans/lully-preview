@@ -41,7 +41,7 @@ body.full .top,body.full .bottom{display:none}
 </head>
 <body>
 <div class="top">
-  <div><small>Lully blanket preview v20 · 4 × 5 ft · 320 LEDs</small><div id="scene">Ready</div><div id="layers"></div></div>
+  <div><small>Lully blanket preview v21 · 4 × 5 ft · 320 LEDs</small><div id="scene">Ready</div><div id="layers"></div></div>
   <div id="hit"></div>
 </div>
 <div id="stage"><canvas id="cv"></canvas><div id="fullhint"></div></div>
@@ -612,14 +612,14 @@ function placeFor(spec,mods,others){
 // ---- Cloud AI (optional): sends each finished sentence's TEXT (never audio) to a private relay that asks Claude for a richer scene.
 // The on-device model keeps reacting instantly; Claude's answer blends in a second or two later.
 const Cloud=(function(){
-  const btn=document.getElementById('cloud');let mode='off',url='',pass='',story=[],prev=null,busy=false,queued=null,lastMs=0;
-  try{url=localStorage.getItem('lullyRelay')||'';pass=localStorage.getItem('lullyPass')||'';mode=localStorage.getItem('lullyCloud')||'off'}catch(e){}
+  const btn=document.getElementById('cloud');let mode='off',url='https://lully-relay.jdustinstone.workers.dev',pass='',story=[],prev=null,busy=false,queued=null,lastMs=0;
+  try{url=localStorage.getItem('lullyRelay')||'https://lully-relay.jdustinstone.workers.dev';pass=localStorage.getItem('lullyPass')||'';mode=localStorage.getItem('lullyCloud')||'off'}catch(e){}
   const NUMW=n=>n<=1?'one':n<=12?['','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve'][n]:n<=16?'fifteen':'twenty';
   function label(){btn.textContent=mode==='off'?'Cloud AI: off':mode==='fast'?'Cloud AI: Haiku (fast)':'Cloud AI: Sonnet (rich)'}
   function save(){try{localStorage.setItem('lullyRelay',url);localStorage.setItem('lullyPass',pass);localStorage.setItem('lullyCloud',mode)}catch(e){}}
   btn.addEventListener('click',()=>{
     if(mode==='off'&&(!url||!pass)){
-      const u=prompt('Cloud relay address (from Cloudflare, ends in workers.dev):',url||'https://');if(!u)return;
+      const u=url||prompt('Cloud relay address (ends in workers.dev):','https://');if(!u)return;
       const p=prompt('Relay passcode:',pass||'');if(!p)return;url=u.trim().replace(/\/$/,'');pass=p.trim();
     }
     mode=mode==='off'?'fast':mode==='fast'?'rich':'off';save();label();showHit(btn.textContent);
