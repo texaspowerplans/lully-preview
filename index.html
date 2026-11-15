@@ -31,15 +31,20 @@ button.stop{background:#ff5a5f;color:#fff}
 button:focus-visible,input:focus-visible{outline:3px solid #ffd54a;outline-offset:2px}
 form{display:flex;gap:8px;flex:1 1 200px}
 input{flex:1;font-family:inherit;font-size:16px;min-height:44px;padding:0 12px;border-radius:12px;border:0;background:rgba(255,255,255,.9);color:#111}
+body.full{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);background:#000}
+body.full .top,body.full .bottom{display:none}
+#stage{cursor:pointer;-webkit-tap-highlight-color:transparent}
+#fullhint{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);font-size:13px;padding:6px 12px;border-radius:999px;background:rgba(0,0,0,.45);color:#fff;opacity:0;transition:opacity .6s;pointer-events:none;white-space:nowrap}
+#fullhint.on{opacity:.85}
 #warn{display:none;background:rgba(255,90,95,.18);padding:10px 12px;border-radius:10px;font-size:14px}
 </style>
 </head>
 <body>
 <div class="top">
-  <div><small>Lully blanket preview v18 · 4 × 5 ft · 320 LEDs</small><div id="scene">Ready</div><div id="layers"></div></div>
+  <div><small>Lully blanket preview v19 · 4 × 5 ft · 320 LEDs</small><div id="scene">Ready</div><div id="layers"></div></div>
   <div id="hit"></div>
 </div>
-<div id="stage"><canvas id="cv"></canvas></div>
+<div id="stage"><canvas id="cv"></canvas><div id="fullhint"></div></div>
 <div class="bottom">
   <div id="warn"></div>
   <div id="text"><span class="i">Tap Start and read a story aloud, or try a demo.</span></div>
@@ -184,10 +189,28 @@ function makeFabric(w,h){
 function layout(){
   const r=cv.parentElement.getBoundingClientRect();dpr=Math.min(2,window.devicePixelRatio||1);W=r.width;H=r.height;
   cv.width=Math.max(1,W*dpr);cv.height=Math.max(1,H*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);
-  const pad=16,ar=48/60;let h=H-pad*2,w=h*ar;if(w>W-pad*2){w=W-pad*2;h=w/ar}
+  const pad=document.body.classList.contains('full')?6:16,ar=48/60;let h=H-pad*2,w=h*ar;if(w>W-pad*2){w=W-pad*2;h=w/ar}
   bw=Math.max(10,w);bh=Math.max(10,h);bx=(W-bw)/2;by=(H-bh)/2;fabric=makeFabric(Math.round(bw*dpr),Math.round(bh*dpr));
 }
 new ResizeObserver(layout).observe(cv.parentElement);layout();
+// tap the blanket for a full-screen view with all controls hidden; tap again to come back
+(function(){
+  const st=document.getElementById('stage'),hint=document.getElementById('fullhint');let ht=0;
+  function showHint(t){hint.textContent=t;hint.classList.add('on');clearTimeout(ht);ht=setTimeout(()=>hint.classList.remove('on'),2200)}
+  function setFull(on){
+    document.body.classList.toggle('full',on);
+    const d=document,el=d.documentElement;
+    try{if(on&&!d.fullscreenElement&&!d.webkitFullscreenElement){(el.requestFullscreen||el.webkitRequestFullscreen||function(){}).call(el)}
+        else if(!on&&(d.fullscreenElement||d.webkitFullscreenElement)){(d.exitFullscreen||d.webkitExitFullscreen).call(d)}}catch(e){}
+    try{if(on&&navigator.wakeLock)navigator.wakeLock.request('screen').catch(()=>{})}catch(e){}
+    if(on)showHint('Tap to show controls');
+    setTimeout(layout,60);
+  }
+  st.addEventListener('click',()=>setFull(!document.body.classList.contains('full')));
+  const sync=()=>{if(!document.fullscreenElement&&!document.webkitFullscreenElement&&document.body.classList.contains('full')&&document.fullscreenEnabled)setFull(false)};
+  document.addEventListener('fullscreenchange',sync);document.addEventListener('webkitfullscreenchange',sync);
+  showHint('Tap the blanket for full screen');
+})();
 
 const mix=(a,b,k)=>a.map((v,i)=>v+(b[i]-v)*k);
 const cur={top:[20,22,50],bot:[4,5,15],b:.6,m:1,starC:[255,250,220],fallC:[255,255,255],fallV:.6};
