@@ -41,7 +41,7 @@ body.full .top,body.full .bottom{display:none}
 </head>
 <body>
 <div class="top">
-  <div><small>Lully blanket preview v25 · 4 × 5 ft · 320 LEDs</small><div id="scene">Ready</div><div id="layers"></div></div>
+  <div><small>Lully blanket preview v26 · 4 × 5 ft · 320 LEDs</small><div id="scene">Ready</div><div id="layers"></div></div>
   <div id="hit"></div>
 </div>
 <div id="stage"><canvas id="cv"></canvas><div id="fullhint"></div></div>
@@ -167,7 +167,10 @@ const STOPS={'storm passed':['storm','rain','wind'],'storm ended':['storm','rain
 
 // ---------- Blanket renderer: 4 ft x 5 ft, 16 x 20 = 320 LEDs on a 3-inch grid ----------
 const COLS=16,ROWS=20,N=COLS*ROWS;
-const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+let cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+// Safari can drop a canvas's drawing memory under pressure; if that happens, swap in a fresh canvas and carry on
+function freshCanvas(){const n=document.createElement('canvas');n.id='cv';cv.replaceWith(n);cv=n;ctx=cv.getContext('2d');lastLayout='';layout()}
+cv.addEventListener('contextlost',()=>setTimeout(freshCanvas,50));
 const A=document.createElement('canvas');A.width=COLS;A.height=ROWS;const actx=A.getContext('2d');const aImg=actx.createImageData(COLS,ROWS);
 const S=4,Bc=document.createElement('canvas');Bc.width=COLS*S;Bc.height=ROWS*S;const bctx=Bc.getContext('2d');const bImg=bctx.createImageData(COLS*S,ROWS*S);
 const Mc=document.createElement('canvas');Mc.width=COLS*8;Mc.height=ROWS*8;const mctx=Mc.getContext('2d');
@@ -257,6 +260,7 @@ function frame(now){
   try{frameBody(now)}catch(e){if(frameErr++<3){console.error(e);try{document.getElementById('status').textContent='Display error: '+(e&&e.message||e)}catch(_){}}}
 }
 function frameBody(now){
+  if(ctx.isContextLost&&ctx.isContextLost()){freshCanvas();return}
   const dt=Math.min(.1,(now-last)/1000);last=now;const t=now/1000;
   const k8=1-Math.exp(-dt/fadeTau),k15=1-Math.exp(-dt/1.5);
   idle+=(idleTarget-idle)*Math.min(1,dt/3);
@@ -625,13 +629,13 @@ function placeFor(spec,mods,others){
 const PAINT_PROMPT="You are the light artist for Lully, a children's blanket with a 16 x 20 grid of RGB LEDs under white plush fabric. The fabric diffuses the light into soft glowing color, like a painting made of light. A story is being read aloud. For each new sentence, decide whether the blanket's living picture should change, and if so, paint the new one as code.\n\nThe blanket has no top or bottom; it lies on a bed and is seen from any side. Fill the whole blanket. Think in abstract, impressionist terms, like light painting rather than a drawing: prefer textures and light spread over the whole blanket to one small object in the middle; imagine the scene the words conjure, then translate its colors, light and motion onto the grid. Vivid, saturated, luminous color; use the full RGB range. Rich gradients and several hues, never flat gray or muddy. Darkness only where the scene is truly dark (night), and even then keep deep, beautiful color (navy, indigo, violet).\n\nMotion must be physically believable and lively:\n- lightning: sudden, near-instant, blinding white-violet branching bolt or whole-blanket flash lasting ~0.1-0.2 s, sometimes a double flicker, then darkness, repeating every few seconds at random-looking intervals\n- fire, embers: many fast flickering warm pixels; embers rise quickly and fade; hearth glow pulses irregularly\n- snow and rain: many particles at their real speeds (rain fast streaks, snow slow drifting with sway); direction is arbitrary but consistent\n- water: rolling waves, caustic shimmer; stars: still points with gentle twinkle; fireflies: blink on and off while wandering\n- sunshine, meadows, sky: broad warm gradients that breathe slowly\n\nWrite the body of a JavaScript function  paint(x, y, t)  that returns [r, g, b] with each 0-255, for LED column x (0-15), row y (0-19), at time t in seconds since this scene began. It is called for all 320 LEDs about 30 times per second, so keep it light. Plain ES2017 only. Available helpers (do not redefine): W=16, H=20, PI, sin, cos, abs, floor, min, max, sqrt, pow, exp, hash(n) -> 0..1 deterministic, noise(x,y,z) -> smooth 0..1, hsv(h,s,v) -> [r,g,b] with h in 0..1, mix(a,b,k) mixes two colors, clamp(v,a,b), wrapd(ax,ay,bx,by) -> distance on the wrap-around blanket. For many particles, loop over i with positions derived from hash(i) and t, wrapping with ((v % W) + W) % W. Use additive light: start from a background color and add glowing things on top. Be concise: at most 25 short lines, no comments, no explanation. Speed matters: the picture must appear within a couple of seconds.\n\nReply in exactly this format and nothing else:\nTITLE: short name of the picture\n```js\nfunction body here\n```\nIf the newest sentence does not change what the reader would picture (same place, nothing new appearing or happening), reply with only the word: KEEP\n";
 const PAINT_HELPERS="const W=16,H=20,PI=Math.PI,{sin,cos,abs,floor,min,max,sqrt,pow,exp,atan2,round}=Math;\nconst hash=n=>{const s=Math.sin(n*127.1+311.7)*43758.5453;return s-Math.floor(s)};\nconst h3=(x,y,z)=>hash(x*157+y*113+z*271);\nconst sm=t=>t*t*(3-2*t);\nfunction noise(x,y,z){const X=floor(x),Y=floor(y),Z=floor(z),fx=sm(x-X),fy=sm(y-Y),fz=sm(z-Z);const L=(a,b,t)=>a+(b-a)*t;\n return L(L(L(h3(X,Y,Z),h3(X+1,Y,Z),fx),L(h3(X,Y+1,Z),h3(X+1,Y+1,Z),fx),fy),L(L(h3(X,Y,Z+1),h3(X+1,Y,Z+1),fx),L(h3(X,Y+1,Z+1),h3(X+1,Y+1,Z+1),fx),fy),fz)}\nfunction hsv(h,s,v){h=((h%1)+1)%1;const i=floor(h*6),f=h*6-i,p=v*(1-s),q=v*(1-f*s),u=v*(1-(1-f)*s);const c=[[v,u,p],[q,v,p],[p,v,u],[p,q,v],[u,p,v],[v,p,q]][i%6];return c.map(k=>k*255)}\nconst mix=(a,b,k)=>[a[0]+(b[0]-a[0])*k,a[1]+(b[1]-a[1])*k,a[2]+(b[2]-a[2])*k];\nconst clamp=(v,a,b)=>v<a?a:v>b?b:v;\nfunction wrapd(ax,ay,bx,by){let dx=abs(ax-bx)%W,dy=abs(ay-by)%H;dx=min(dx,W-dx);dy=min(dy,H-dy);return sqrt(dx*dx+dy*dy)}\n";
 const Painter=(function(){
-  let worker=null,fn=null,frameBuf=null,lastFrameAt=0,from=null,since=0,active=false,title='',fadeOutAt=0,code0='',gotFrame=false,mode='';
+  let slow=0,skip=false,worker=null,fn=null,frameBuf=null,lastFrameAt=0,from=null,since=0,active=false,title='',fadeOutAt=0,code0='',gotFrame=false,mode='';
   const shown=new Float32Array(N*3);
   function stopWorker(){if(worker){worker.terminate();worker=null}fn=null}
   function start(code,t){
     try{new Function(PAINT_HELPERS+'\nreturn function paint(x,y,t){'+code+'\n}')}catch(e){return 'compile: '+e.message}
     from=active?shown.slice():null;stopWorker();title=t;frameBuf=null;lastFrameAt=performance.now();code0=code;gotFrame=false;mode='worker';
-    if(typeof Worker!=='undefined'&&typeof Blob!=='undefined'){
+    if(false){
       const src=PAINT_HELPERS+`
 self.fetch=undefined;self.XMLHttpRequest=undefined;self.WebSocket=undefined;self.importScripts=undefined;self.EventSource=undefined;
 const paint=(function(){"use strict";return function(x,y,t){${code}\n}})();
@@ -643,16 +647,17 @@ setInterval(()=>{const t=(performance.now()-t0)/1000;let k=0;
       try{worker=new Worker(URL.createObjectURL(new Blob([src],{type:'text/javascript'})));
         worker.onmessage=e=>{frameBuf=e.data;lastFrameAt=performance.now();gotFrame=true};worker.onerror=ev=>{try{ev.preventDefault()}catch(e){}useMain('worker error')}}catch(e){worker=null}
     }
-    if(!worker){const e=useMain('no worker');if(e)return e}
+    if(/\bwhile\s*\(|\bdo\s*\{|for\s*\(\s*;\s*;/.test(code))return 'unsafe loop';
+    if(!worker){const e=useMain('page');if(e)return e}
     since=performance.now();active=true;fadeOutAt=0;return null;
   }
   // if the sandboxed worker can't run on this browser, paint on the main thread instead of freezing
   function useMain(why){if(worker){worker.terminate();worker=null}mode='main ('+why+')';
-    try{fn=new Function(PAINT_HELPERS+'\nreturn function paint(x,y,t){'+code0+'\n}')();try{aiEl.textContent+=' · '+mode}catch(e){}return null}catch(e){fn=null;return 'compile: '+e.message}}
+    try{fn=new Function(PAINT_HELPERS+'\nreturn function paint(x,y,t){'+code0+'\n}')();return null}catch(e){fn=null;return 'compile: '+e.message}}
   function blend(buf,now){
     if(!active)return;
-    if(fn){const t=(now-since)/1000;if(!frameBuf)frameBuf=new Float32Array(N*3);let k=0;
-      let bad=0;for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){let v;try{v=fn(x,y,t)}catch(e){v=[0,0,0];bad++}frameBuf[k++]=+v[0]||0;frameBuf[k++]=+v[1]||0;frameBuf[k++]=+v[2]||0}if(bad===N)fn=null;
+    if(fn&&(slow<8||(skip=!skip))){const t=(now-since)/1000,t0=performance.now();if(!frameBuf)frameBuf=new Float32Array(N*3);let k=0;
+      let bad=0;for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){let v;try{v=fn(x,y,t)}catch(e){v=[0,0,0];bad++}frameBuf[k++]=+v[0]||0;frameBuf[k++]=+v[1]||0;frameBuf[k++]=+v[2]||0}if(bad===N)fn=null;const ms=performance.now()-t0;slow=ms>18?Math.min(20,slow+1):Math.max(0,slow-1);
       lastFrameAt=now}
     if(worker&&!gotFrame&&now-since>900)useMain('worker silent');
     else if(worker&&now-lastFrameAt>3000)useMain('worker stalled');
