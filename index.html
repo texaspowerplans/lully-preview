@@ -41,7 +41,7 @@ body.full .top,body.full .bottom{display:none}
 </head>
 <body>
 <div class="top">
-  <div><small>Lully blanket preview v24 · 4 × 5 ft · 320 LEDs</small><div id="scene">Ready</div><div id="layers"></div></div>
+  <div><small>Lully blanket preview v25 · 4 × 5 ft · 320 LEDs</small><div id="scene">Ready</div><div id="layers"></div></div>
   <div id="hit"></div>
 </div>
 <div id="stage"><canvas id="cv"></canvas><div id="fullhint"></div></div>
@@ -173,10 +173,11 @@ const S=4,Bc=document.createElement('canvas');Bc.width=COLS*S;Bc.height=ROWS*S;c
 const Mc=document.createElement('canvas');Mc.width=COLS*8;Mc.height=ROWS*8;const mctx=Mc.getContext('2d');
 let W=0,H=0,dpr=1,bx=0,by=0,bw=0,bh=0,fabric=null;
 function rr(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath()}
+const FAB_CV=document.createElement('canvas'),NZ_CV=document.createElement('canvas');
 function makeFabric(w,h){
   // White plush/minky top layer: soft fur grain, faint stitched quilting, a gentle sheen. Drawn over the light.
-  const f=document.createElement('canvas');f.width=Math.max(1,w);f.height=Math.max(1,h);const c=f.getContext('2d');
-  const nw=Math.max(1,w>>1),nh=Math.max(1,h>>1),nz=document.createElement('canvas');nz.width=nw;nz.height=nh;
+  const f=FAB_CV;f.width=Math.max(1,w);f.height=Math.max(1,h);const c=f.getContext('2d');c.clearRect(0,0,f.width,f.height);
+  const nw=Math.max(1,w>>1),nh=Math.max(1,h>>1),nz=NZ_CV;nz.width=nw;nz.height=nh;
   const nc=nz.getContext('2d'),id=nc.createImageData(nw,nh),d=id.data;
   for(let i=0;i<d.length;i+=4){const n=Math.random();if(n<.5){d[i]=d[i+1]=d[i+2]=0;d[i+3]=n*26}else{d[i]=d[i+1]=d[i+2]=255;d[i+3]=(n-.5)*30}}
   nc.putImageData(id,0,0);c.imageSmoothingEnabled=true;c.drawImage(nz,0,0,w,h);
@@ -185,15 +186,19 @@ function makeFabric(w,h){
     for(let x=-h;x<w+h;x+=step){c.moveTo(x+o,0);c.lineTo(x+h+o,h);c.moveTo(x+o,h);c.lineTo(x+h+o,0)}c.stroke()}
   const g=c.createLinearGradient(0,0,w,h);g.addColorStop(0,'rgba(255,255,255,.06)');g.addColorStop(.5,'rgba(255,255,255,0)');g.addColorStop(1,'rgba(0,0,0,.05)');c.fillStyle=g;c.fillRect(0,0,w,h);
   c.strokeStyle='rgba(0,0,0,.18)';c.lineWidth=Math.max(2,w/120);rr(c,c.lineWidth/2,c.lineWidth/2,w-c.lineWidth,h-c.lineWidth,18*(w/Math.max(1,bw)));c.stroke();
+  nz.width=1;nz.height=1;
   return f;
 }
+let lastLayout='';
 function layout(){
-  const r=cv.parentElement.getBoundingClientRect();dpr=Math.min(2,window.devicePixelRatio||1);W=r.width;H=r.height;
+  const r=cv.parentElement.getBoundingClientRect();dpr=Math.min(2,window.devicePixelRatio||1);
+  const key=Math.round(r.width)+'x'+Math.round(r.height)+'@'+dpr+document.body.classList.contains('full');if(key===lastLayout)return;lastLayout=key;W=r.width;H=r.height;
   cv.width=Math.max(1,W*dpr);cv.height=Math.max(1,H*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);
   const pad=document.body.classList.contains('full')?6:16,ar=48/60;let h=H-pad*2,w=h*ar;if(w>W-pad*2){w=W-pad*2;h=w/ar}
   bw=Math.max(10,w);bh=Math.max(10,h);bx=(W-bw)/2;by=(H-bh)/2;fabric=makeFabric(Math.round(bw*dpr),Math.round(bh*dpr));
 }
-new ResizeObserver(layout).observe(cv.parentElement);layout();
+let layoutT=0;const layoutSoon=()=>{clearTimeout(layoutT);layoutT=setTimeout(layout,150)};
+new ResizeObserver(layoutSoon).observe(cv.parentElement);layout();
 // tap the blanket for a full-screen view with all controls hidden; tap again to come back
 (function(){
   const st=document.getElementById('stage'),hint=document.getElementById('fullhint');let ht=0;
@@ -205,7 +210,7 @@ new ResizeObserver(layout).observe(cv.parentElement);layout();
         else if(!on&&(d.fullscreenElement||d.webkitFullscreenElement)){(d.exitFullscreen||d.webkitExitFullscreen).call(d)}}catch(e){}
     try{if(on&&navigator.wakeLock)navigator.wakeLock.request('screen').catch(()=>{})}catch(e){}
     if(on)showHint('Tap to show controls');
-    setTimeout(layout,60);
+    layoutSoon();
   }
   st.addEventListener('click',()=>setFull(!document.body.classList.contains('full')));
   const sync=()=>{if(!document.fullscreenElement&&!document.webkitFullscreenElement&&document.body.classList.contains('full')&&document.fullscreenEnabled)setFull(false)};
@@ -246,7 +251,12 @@ function dot(x,y,c,a,spread){const ci=Math.round(x),cj=Math.round(y);
   for(let j=cj-1;j<=cj+1;j++)for(let i=ci-1;i<=ci+1;i++){if(i<0||j<0||i>=COLS||j>=ROWS)continue;const w=a*Math.exp(-((i-x)**2+(j-y)**2)/spread);if(w>.004)add(j*COLS+i,c,w)}}
 function hsv(h){const f=(n)=>{const k=(n+h*6)%6;return 255*(1-Math.max(0,Math.min(k,4-k,1)))};return[f(5),f(3),f(1)]}
 let last=performance.now();
+let frameErr=0;
 function frame(now){
+  requestAnimationFrame(frame);
+  try{frameBody(now)}catch(e){if(frameErr++<3){console.error(e);try{document.getElementById('status').textContent='Display error: '+(e&&e.message||e)}catch(_){}}}
+}
+function frameBody(now){
   const dt=Math.min(.1,(now-last)/1000);last=now;const t=now/1000;
   const k8=1-Math.exp(-dt/fadeTau),k15=1-Math.exp(-dt/1.5);
   idle+=(idleTarget-idle)*Math.min(1,dt/3);
@@ -328,7 +338,6 @@ function frame(now){
   if(fabric)ctx.drawImage(fabric,bx,by,bw,bh);
   if(showLeds){ctx.fillStyle='rgba(255,255,255,.55)';for(let j=0;j<ROWS;j++)for(let i=0;i<COLS;i++){ctx.beginPath();ctx.arc(bx+(i+.5)/COLS*bw,by+(j+.5)/ROWS*bh,1.6,0,7);ctx.fill()}}
   ctx.restore();
-  requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 const DIFF=[{l:'Diffusion: plush',h:.15},{l:'Diffusion: thin sheet',h:.6},{l:'Diffusion: perfect',h:0}];let diffI=0;
