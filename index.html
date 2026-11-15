@@ -36,7 +36,7 @@ input{flex:1;font-family:inherit;font-size:16px;min-height:44px;padding:0 12px;b
 </head>
 <body>
 <div class="top">
-  <div><small>Lully blanket preview v16 · 4 × 5 ft · 320 LEDs</small><div id="scene">Ready</div><div id="layers"></div></div>
+  <div><small>Lully blanket preview v17 · 4 × 5 ft · 320 LEDs</small><div id="scene">Ready</div><div id="layers"></div></div>
   <div id="hit"></div>
 </div>
 <div id="stage"><canvas id="cv"></canvas></div>
@@ -533,6 +533,48 @@ const SLOWW=new Set(['slowly','gently','lazily','softly','gradually','calmly']),
 const BLINKW=new Set(['twinkled','twinkling','flickered','flickering','blinked','blinking','winked','sparkled','pulsed']);
 const GONEW=new Set(['disappeared','vanished','faded','went','gone','dissolved','melted']);
 const objs=[];let objLast=0,gravAng=Math.random()*6.283;
+// ---------- Dictionary of things (written by Claude Opus) ----------
+// things.json: a few thousand storybook nouns with how each should look as light: shape, size, colors,
+// whether it glows or twinkles, how it moves, how many, the background it suggests, and what comes with it.
+const THINGS_MULTI=new Map();let thingsCount=0;
+const THING_SKIP=new Set(['glow','light','lights','sound','noise','music','color','colour','shadow','air','ground','dusk','dawn','evening','morning','night','day','sky','water','sea','ocean','place','home','house','room','world','wind','weather','dream','dreams','wish','magic','happiness','love','sleep','bedtime']);
+const RAINBOW=[[255,60,60],[255,200,40],[60,220,90],[60,140,255],[200,80,255]];
+const MULTIW=new Set(['multicolored','multicolor','colorful','colourful','rainbow','festive','sparkly']);
+function thingSpec(e){
+  const mo=e.motion||'still',v=+e.speed||0,shape=['blob','flake','point','glow'].includes(e.shape)?e.shape:'blob';
+  return{shape,size:Math.max(.3,Math.min(4,+e.size||1)),c:e.colors[0],palette:e.colors.length>1?e.colors:null,
+    bright:e.emits?1:.9,blend:e.emits&&shape!=='blob'?'add':'mix',blink:Math.min(1,+e.twinkle||0)*.8,
+    fall:mo==='fall'?1:mo==='rise'?-1:0,v:v||.6,sway:(mo==='flutter'||mo==='fall'||mo==='rise')?.7:mo==='wander'?1:0,
+    move:['drift','fly','swim','sweep','wander','flutter'].includes(mo)?(v||.6):0,
+    n:Math.max(1,Math.min(20,+e.count||5)),bg:Array.isArray(e.bg)&&e.bg.length===2?e.bg:null,bgs:+e.bg_strength||0,with:e.with||[],thing:true};
+}
+async function loadThings(){
+  try{const r=await fetch('things.json');if(!r.ok)return;const list=await r.json();
+    for(const e of list){if(!e||!e.name||!Array.isArray(e.colors)||!e.colors.length)continue;
+      const nm=e.name.toLowerCase().trim(),key=nm.replace(/\s+/g,'_');if(OBJ[key])continue;
+      if(COLORW[nm]||MULTIW.has(nm)||/^(light |dark |pale |bright |deep )?(red|orange|yellow|green|blue|purple|pink|white|black|gold|silver|brown|gr[ae]y|violet|indigo|teal|turquoise)$/.test(nm)||THING_SKIP.has(nm))continue;
+      const sp=thingSpec(e);
+      // huge scene-defining things (the sea, a meadow, dusk) set the background instead of being drawn as a shape
+      if((sp.shape==='blob'||sp.shape==='glow')&&sp.size>=3.5&&sp.bgs>=.5&&!/tree|rainbow|dragon|whale|castle|moon|sun/.test(nm))sp.bgOnly=true;
+      OBJ[key]=sp;thingsCount++;
+      for(const a of [e.name,...(e.aliases||[])]){const al=String(a).toLowerCase().trim().replace(/[^a-z ]/g,'');if(!al)continue;
+        if(al.includes(' '))THINGS_MULTI.set(al,key);else if(!OBJ[al]&&!ALIAS[al])ALIAS[al]=key}}
+  }catch(e){}
+}
+function mergeThings(ws){
+  for(let L=3;L>=2;L--)for(let i=0;i+L<=ws.length;i++){const k=ws.slice(i,i+L).join(' ');const key=THINGS_MULTI.get(k)||THINGS_MULTI.get(k.replace(/s$/,''))||THINGS_MULTI.get(k.replace(/es$/,''));
+    if(key)ws.splice(i,L,key)}
+  return ws;
+}
+function pullBackground(bg,strength){
+  if(sceneSys!=='recipe')return;const k=Math.min(.85,strength),now=performance.now();
+  rcp.A=mix(rcp.A,bg[0],k);rcp.B=mix(rcp.B,bg[1],k);
+  const S=SCENES.recipe,vivid=c=>{const l=(c[0]+c[1]+c[2])/3;return c.map(x=>Math.max(0,Math.min(255,l+(x-l)*1.3)))};
+  S.top=vivid(rcp.A);S.bot=vivid(rcp.B);S.b=Math.max(S.b||.6,.65);
+  if(current!=='recipe'){current='recipe';target=S;fadeTau=1.2;sceneSince=now}
+  rcpPending.bgHoldUntil=now+9000;rcpPending.anchor=rcp.A.concat(rcp.B);
+}
+
 function objName(w){if(OBJ[w])return w;if(ALIAS[w])return ALIAS[w];const s=w.replace(/s$/,'');return OBJ[s]?s:null}
 function placeFor(spec,mods,others){
   // No top or bottom: pick spots across the whole blanket, as far as possible from others of the same kind.
@@ -544,7 +586,7 @@ function placeFor(spec,mods,others){
   return best;
 }
 function parseSentence(raw){
-  const ws=raw.map(norm).filter(Boolean);if(!ws.length)return;
+  const ws=mergeThings(raw.map(norm).filter(Boolean));if(!ws.length)return;
   const now=performance.now();
   // sentence-wide modifiers
   const mods={};
@@ -567,7 +609,7 @@ function parseSentence(raw){
     const spec=OBJ[name];
     // look back up to 5 words for count, color, size, brightness, and "the" (= an object already showing)
     let count=null,color=null,cname='',size=1,bright=null,ref=false;const colors=[];
-    for(let j=i-1;j>=Math.max(0,i-7);j--){const w=ws[j];if(objName(w))break;if(COLORW[w])colors.unshift(COLORW[w]);
+    for(let j=i-1;j>=Math.max(0,i-7);j--){const w=ws[j];if(objName(w))break;if(COLORW[w])colors.unshift(COLORW[w]);if(MULTIW.has(w)||(w==='colored'&&ws[j-1]==='multi'))colors.unshift(...RAINBOW);
       if(COUNT[w]!=null&&count==null)count=COUNT[w];if(COLORW[w]&&!color){color=COLORW[w];cname=w+' '}if(SIZEW[w])size*=SIZEW[w];
       if(BRIGHTW[w]!=null&&bright==null)bright=BRIGHTW[w];if(w==='the'||w==='that'||w==='this')ref=true}
     for(let j=i+1;j<=Math.min(ws.length-1,i+3);j++){const w=ws[j];if(objName(w))break;if(BRIGHTW[w]!=null)bright=Math.max(bright||0,BRIGHTW[w])}
@@ -582,6 +624,7 @@ function parseSentence(raw){
       showHit(`the ${name} → ${mods.move||mods.vy?'moving':'updated'}`);continue}
     if(mine.some(o=>now-o.born<4000))continue; // same sentence heard twice (live speech)
     for(const o of mine)o.dying=true;           // a new description replaces the old one
+    if(spec.bgOnly){if(spec.bg)pullBackground(spec.bg,spec.bgs);continue}
     const n=Math.min(count,spec.n?20:14);
     const ang=Math.random()*6.283,sp=mods.speed||.8;
     const placed=objs.filter(o=>o.name===name&&!o.dying);
@@ -590,12 +633,16 @@ function parseSentence(raw){
       let vx0=0,vy0=0;
       if(spec.fall){const a=gravAng+(spec.fall<0?Math.PI:0)+(Math.random()-.5)*.5,v=spec.v*(.7+Math.random()*.6)*(mods.speed?mods.speed/.8:1);vx0=Math.cos(a)*v;vy0=Math.sin(a)*v}
       else if(mods.move||mods.vy){vx0=Math.cos(ang)*sp*(.85+Math.random()*.3);vy0=Math.sin(ang)*sp*(.85+Math.random()*.3)}
+      else if(spec.move){const a=Math.random()*6.283,v=spec.move*(.7+Math.random()*.6);vx0=Math.cos(a)*v;vy0=Math.sin(a)*v}
       objs.push({name,shape:spec.shape,blend:spec.blend||'add',x,y,size:(spec.size||1)*size*(mods.pos==='far'?.7:1),far:mods.pos==='far',c:pal?pal[m%pal.length]:(color||spec.c),
         sway:spec.sway||0,flick:spec.flicker||0,streak:spec.streak||0,vx:vx0,vy:vy0,
         bright:(bright!=null?bright:spec.bright)*(mods.pos==='far'&&spec.shape==='blob'?.8:1),blink:mods.blink||spec.blink||0,ph:Math.random()*6.3,
         born:now,seen:now,a:0,dying:false});placed.push(objs[objs.length-1])}
     while(objs.length>60)objs.shift();
-    showHit(`${n===1?'one':n} ${colors.length>1?'many-colored ':cname}${name}${n>1?({leaf:'leaves',firefly:'fireflies'}[name]?({leaf:'leaves',firefly:'fireflies'}[name]).slice(name.length):'s'):''}${spec.fall?(spec.fall>0?' drifting':' rising'):''} → on the blanket`);
+    if(spec.bg&&spec.bgs>=.3)pullBackground(spec.bg,spec.bgs);
+    if(spec.bgs>=.5)for(const w2 of (spec.with||[]).slice(0,1)){const k2=String(w2).toLowerCase().trim().replace(/\s+/g,'_');const s2=OBJ[k2];if(s2&&(s2.shape==='point'||s2.blend==='add')&&!s2.bgOnly&&!objs.some(o=>o.name===k2&&!o.dying))spawnThing(k2)}
+    {const groups=[...new Set(objs.filter(o=>!o.dying).map(o=>o.name))];while(groups.length>5){const g=groups.shift();objs.forEach(o=>{if(o.name===g)o.dying=true})}}
+    showHit(`${n===1?'one':n} ${colors.length>1?'many-colored ':cname}${name.replace(/_/g,' ')}${n>1?({leaf:'leaves',firefly:'fireflies'}[name]?({leaf:'leaves',firefly:'fireflies'}[name]).slice(name.length):'s'):''}${spec.fall?(spec.fall>0?' drifting':' rising'):''} → on the blanket`);
   }
   renderLayers();
 }
@@ -656,7 +703,7 @@ function remember(k,a){if(k==='calm')return;decayStory(performance.now());story[
 function showHit(s){hitEl.textContent=s;hitEl.classList.add('on');clearTimeout(hitTimer);hitTimer=setTimeout(()=>hitEl.classList.remove('on'),2800)}
 function setScene(k,why,slow){fadeTau=slow?4:.8;if(k!==current){current=k;target=SCENES[k];sceneEl.textContent=SCENES[k].name}showHit(why)}
 function renderLayers(){const ob=typeof objs!=='undefined'?[...new Set(objs.filter(o=>!o.dying).map(o=>o.name))]:[];
-  const on=ob.map(n=>{const c=objs.filter(o=>o.name===n&&!o.dying).length;return c>1?c+' '+({leaf:'leaves',firefly:'fireflies'}[n]||n+'s'):n}).concat(Object.keys(LAYERS).filter(k=>layerOn[k]).map(k=>LAYERS[k])).concat([...(typeof active!=='undefined'?active.values():[])].filter(a=>a.until>performance.now()).map(a=>a.fx.name));layersEl.textContent=(idleTarget?'Ambient · following the story so far':'')+(on.length?(idleTarget?' · ':'')+'+ '+on.join(' · '):'')}
+  const on=ob.map(n=>{const c=objs.filter(o=>o.name===n&&!o.dying).length;return (c>1?c+' '+({leaf:'leaves',firefly:'fireflies'}[n]||(/s$/.test(n)?n:n+'s')):n).replace(/_/g,' ')}).concat(Object.keys(LAYERS).filter(k=>layerOn[k]).map(k=>LAYERS[k])).concat([...(typeof active!=='undefined'?active.values():[])].filter(a=>a.until>performance.now()).map(a=>a.fx.name));layersEl.textContent=(idleTarget?'Ambient · following the story so far':'')+(on.length?(idleTarget?' · ':'')+'+ '+on.join(' · '):'')}
 function setLayer(k,on,why){if(layerOn[k]===on)return;layerOn[k]=on;renderLayers();if(why)showHit(why)}
 function decay(now){const dt=now-lastDecay;lastDecay=now;const ds=Math.exp(-dt/25000),dl=Math.exp(-dt/60000);
   for(const k in ev)ev[k]*=ds;
@@ -796,6 +843,7 @@ function spawnThing(name){
   for(let m=0;m<n;m++){const[x,y]=placeFor(spec,{},placed);let vx=0,vy=0;
     if(spec.fall){const a=gravAng+(spec.fall<0?Math.PI:0)+(Math.random()-.5)*.5,v=spec.v*(.7+Math.random()*.6);vx=Math.cos(a)*v;vy=Math.sin(a)*v}
     else if(name==='cloud'){vx=Math.cos(ang)*.35;vy=Math.sin(ang)*.35}
+    else if(spec.move){const a=Math.random()*6.283,v=spec.move*(.7+Math.random()*.6);vx=Math.cos(a)*v;vy=Math.sin(a)*v}
     const o={name,shape:spec.shape,blend:spec.blend||'add',x,y,size:spec.size||1,c:spec.palette?spec.palette[m%spec.palette.length]:spec.c,
       sway:spec.sway||0,flick:spec.flicker||0,streak:spec.streak||0,vx,vy,bright:spec.bright,blink:spec.blink||0,ph:Math.random()*6.3,born:now,seen:now,a:0,dying:false,auto:true};
     objs.push(o);placed.push(o)}
@@ -810,7 +858,7 @@ function recipeStep(){
   const moved=Math.hypot(rcp.A[0]-rcpPending.anchor[0],rcp.A[1]-rcpPending.anchor[1],rcp.A[2]-rcpPending.anchor[2])+Math.hypot(rcp.B[0]-rcpPending.anchor[3],rcp.B[1]-rcpPending.anchor[4],rcp.B[2]-rcpPending.anchor[5]);
   if(current==='recipe'&&moved>130){placeChanged(now,'recipe');rcpPending.anchor=rcp.A.concat(rcp.B)}
   if(r.rel>.5&&!(asleep&&now-sceneSince<8000)){
-    const w=Math.min(.4,.3*r.rel);
+    const w=Math.min(.4,.3*r.rel)*(now<(rcpPending.bgHoldUntil||0)?.2:1);
     const before=rcp.A.slice();
     rcp.A=mix(rcp.A,r.A,w);rcp.B=mix(rcp.B,r.B,w);rcp.br+=(r.br-rcp.br)*w;rcp.drift+=(r.drift-rcp.drift)*w;
     const S=SCENES.recipe,vivid=c=>{const l=(c[0]+c[1]+c[2])/3;return c.map(x=>Math.max(0,Math.min(255,l+(x-l)*1.3)))};S.top=vivid(rcp.A);S.bot=vivid(rcp.B);S.b=Math.max(.2,rcp.br);S.tempo=.6+rcp.drift*1.6;
@@ -971,6 +1019,7 @@ async function runAI(){
 brainBtn.addEventListener('click',()=>{brain=brain==='both'?'ai':brain==='ai'?'words':'both';brainLabel();loadAI()});
 modelBtn.addEventListener('click',()=>{modelKey=modelKey==='lully'?'mini':modelKey==='mini'?'bge':'lully';ai=null;aiLoading=null;cents=lcents=null;brainLabel();aiEl.textContent='Model switched. It will load on your next Start or demo.'});
 brainLabel();
+loadThings();
 const reactBtn=document.getElementById('react');
 function applyReact(){const Rm=REACT[react];fxScale=Rm.fx;layerScale=Rm.layer;reactBtn.textContent=Rm.label}
 reactBtn.addEventListener('click',()=>{react=react==='calm'?'balanced':react==='balanced'?'lively':'calm';applyReact();showHit(REACT[react].label)});
