@@ -41,7 +41,7 @@ body.full .top,body.full .bottom{display:none}
 </head>
 <body>
 <div class="top">
-  <div><small>Lully blanket preview v21 · 4 × 5 ft · 320 LEDs</small><div id="scene">Ready</div><div id="layers"></div></div>
+  <div><small>Lully blanket preview v22 · 4 × 5 ft · 320 LEDs</small><div id="scene">Ready</div><div id="layers"></div></div>
   <div id="hit"></div>
 </div>
 <div id="stage"><canvas id="cv"></canvas><div id="fullhint"></div></div>
@@ -310,6 +310,7 @@ function frame(now){
   fxFrame(dt,t,now);
   ripples=ripples.filter(p=>{p.r+=p.speed*dt;p.life*=Math.exp(-dt/0.7);return p.life>.02&&p.r<40});
   flashA*=Math.exp(-dt/0.18);
+  if(typeof Painter!=='undefined')Painter.blend(buf,now);
   // draw
   const ad=aImg.data,bd=bImg.data,BW=COLS*S;let sr=0,sg=0,sb=0;
   const soft=v=>v<=0?0:v<190?v:190+65*(1-Math.exp(-(v-190)/65));
@@ -609,54 +610,76 @@ function placeFor(spec,mods,others){
     let d=99;for(const o of others)d=Math.min(d,Math.hypot(o.x-x,o.y-y));if(d>bd){bd=d;best=[x,y]}}
   return best;
 }
-// ---- Cloud AI (optional): sends each finished sentence's TEXT (never audio) to a private relay that asks Claude for a richer scene.
-// The on-device model keeps reacting instantly; Claude's answer blends in a second or two later.
+// ---- Cloud AI painter (optional): each finished sentence's TEXT (never audio) goes to a private relay.
+// Claude imagines the scene and writes a tiny light-painting program for the 16x20 grid; it runs sandboxed in a Web Worker.
+// The on-device model keeps reacting instantly until Claude's painting fades in.
+const PAINT_PROMPT="You are the light artist for Lully, a children's blanket with a 16 x 20 grid of RGB LEDs under white plush fabric. The fabric diffuses the light into soft glowing color, like a painting made of light. A story is being read aloud. For each new sentence, decide whether the blanket's living picture should change, and if so, paint the new one as code.\n\nThe blanket has no top or bottom; it lies on a bed and is seen from any side. Fill the whole blanket. Think in abstract, impressionist terms, like light painting rather than a drawing: prefer textures and light spread over the whole blanket to one small object in the middle; imagine the scene the words conjure, then translate its colors, light and motion onto the grid. Vivid, saturated, luminous color; use the full RGB range. Rich gradients and several hues, never flat gray or muddy. Darkness only where the scene is truly dark (night), and even then keep deep, beautiful color (navy, indigo, violet).\n\nMotion must be physically believable and lively:\n- lightning: sudden, near-instant, blinding white-violet branching bolt or whole-blanket flash lasting ~0.1-0.2 s, sometimes a double flicker, then darkness, repeating every few seconds at random-looking intervals\n- fire, embers: many fast flickering warm pixels; embers rise quickly and fade; hearth glow pulses irregularly\n- snow and rain: many particles at their real speeds (rain fast streaks, snow slow drifting with sway); direction is arbitrary but consistent\n- water: rolling waves, caustic shimmer; stars: still points with gentle twinkle; fireflies: blink on and off while wandering\n- sunshine, meadows, sky: broad warm gradients that breathe slowly\n\nWrite the body of a JavaScript function  paint(x, y, t)  that returns [r, g, b] with each 0-255, for LED column x (0-15), row y (0-19), at time t in seconds since this scene began. It is called for all 320 LEDs about 30 times per second, so keep it light. Plain ES2017 only. Available helpers (do not redefine): W=16, H=20, PI, sin, cos, abs, floor, min, max, sqrt, pow, exp, hash(n) -> 0..1 deterministic, noise(x,y,z) -> smooth 0..1, hsv(h,s,v) -> [r,g,b] with h in 0..1, mix(a,b,k) mixes two colors, clamp(v,a,b), wrapd(ax,ay,bx,by) -> distance on the wrap-around blanket. For many particles, loop over i with positions derived from hash(i) and t, wrapping with ((v % W) + W) % W. Use additive light: start from a background color and add glowing things on top. Be concise: at most 25 short lines, no comments, no explanation. Speed matters: the picture must appear within a couple of seconds.\n\nReply in exactly this format and nothing else:\nTITLE: short name of the picture\n```js\nfunction body here\n```\nIf the newest sentence does not change what the reader would picture (same place, nothing new appearing or happening), reply with only the word: KEEP\n";
+const PAINT_HELPERS="const W=16,H=20,PI=Math.PI,{sin,cos,abs,floor,min,max,sqrt,pow,exp,atan2,round}=Math;\nconst hash=n=>{const s=Math.sin(n*127.1+311.7)*43758.5453;return s-Math.floor(s)};\nconst h3=(x,y,z)=>hash(x*157+y*113+z*271);\nconst sm=t=>t*t*(3-2*t);\nfunction noise(x,y,z){const X=floor(x),Y=floor(y),Z=floor(z),fx=sm(x-X),fy=sm(y-Y),fz=sm(z-Z);const L=(a,b,t)=>a+(b-a)*t;\n return L(L(L(h3(X,Y,Z),h3(X+1,Y,Z),fx),L(h3(X,Y+1,Z),h3(X+1,Y+1,Z),fx),fy),L(L(h3(X,Y,Z+1),h3(X+1,Y,Z+1),fx),L(h3(X,Y+1,Z+1),h3(X+1,Y+1,Z+1),fx),fy),fz)}\nfunction hsv(h,s,v){h=((h%1)+1)%1;const i=floor(h*6),f=h*6-i,p=v*(1-s),q=v*(1-f*s),u=v*(1-(1-f)*s);const c=[[v,u,p],[q,v,p],[p,v,u],[p,q,v],[u,p,v],[v,p,q]][i%6];return c.map(k=>k*255)}\nconst mix=(a,b,k)=>[a[0]+(b[0]-a[0])*k,a[1]+(b[1]-a[1])*k,a[2]+(b[2]-a[2])*k];\nconst clamp=(v,a,b)=>v<a?a:v>b?b:v;\nfunction wrapd(ax,ay,bx,by){let dx=abs(ax-bx)%W,dy=abs(ay-by)%H;dx=min(dx,W-dx);dy=min(dy,H-dy);return sqrt(dx*dx+dy*dy)}\n";
+const Painter=(function(){
+  let worker=null,fn=null,frameBuf=null,lastFrameAt=0,from=null,since=0,active=false,title='',fadeOutAt=0;
+  const shown=new Float32Array(N*3);
+  function stopWorker(){if(worker){worker.terminate();worker=null}fn=null}
+  function start(code,t){
+    try{new Function(PAINT_HELPERS+'\nreturn function paint(x,y,t){'+code+'\n}')}catch(e){return 'compile: '+e.message}
+    from=active?shown.slice():null;stopWorker();title=t;frameBuf=null;lastFrameAt=performance.now();
+    if(typeof Worker!=='undefined'&&typeof Blob!=='undefined'){
+      const src=PAINT_HELPERS+`
+self.fetch=undefined;self.XMLHttpRequest=undefined;self.WebSocket=undefined;self.importScripts=undefined;self.EventSource=undefined;
+const paint=(function(){"use strict";return function(x,y,t){${code}\n}})();
+const out=new Float32Array(${N*3}),t0=performance.now();
+setInterval(()=>{const t=(performance.now()-t0)/1000;let k=0;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){let v;try{v=paint(x,y,t)}catch(e){v=[0,0,0]}
+    out[k++]=+v[0]||0;out[k++]=+v[1]||0;out[k++]=+v[2]||0}
+  postMessage(out)},33);`;
+      try{worker=new Worker(URL.createObjectURL(new Blob([src],{type:'text/javascript'})));
+        worker.onmessage=e=>{frameBuf=e.data;lastFrameAt=performance.now()};worker.onerror=()=>{stopWorker()}}catch(e){worker=null}
+    }
+    if(!worker){try{fn=new Function(PAINT_HELPERS+'\nreturn function paint(x,y,t){'+code+'\n}')()}catch(e){return 'compile: '+e.message}}
+    since=performance.now();active=true;fadeOutAt=0;return null;
+  }
+  function blend(buf,now){
+    if(!active)return;
+    if(fn){const t=(now-since)/1000;if(!frameBuf)frameBuf=new Float32Array(N*3);let k=0;
+      try{for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){const v=fn(x,y,t);frameBuf[k++]=+v[0]||0;frameBuf[k++]=+v[1]||0;frameBuf[k++]=+v[2]||0}}catch(e){fn=null}
+      lastFrameAt=now}
+    if(worker&&now-lastFrameAt>3000){stopWorker()}
+    let a=Math.min(1,(now-since)/1400);if(fadeOutAt){a=Math.max(0,1-(now-fadeOutAt)/1400);if(a<=0){active=false;stopWorker();return}}
+    for(let k=0;k<N*3;k++){const target=frameBuf?Math.max(0,Math.min(255,frameBuf[k])):(from?from[k]:buf[k]);
+      const base=fadeOutAt?buf[k]:(from?from[k]:buf[k]);shown[k]=base+(target-base)*a;buf[k]=shown[k]}
+  }
+  return{start,blend,stop(){if(active&&!fadeOutAt)fadeOutAt=performance.now()},title:()=>title,active:()=>active};
+})();
 const Cloud=(function(){
-  const btn=document.getElementById('cloud');let mode='off',url='https://lully-relay.jdustinstone.workers.dev',pass='',story=[],prev=null,busy=false,queued=null,lastMs=0;
-  try{url=localStorage.getItem('lullyRelay')||'https://lully-relay.jdustinstone.workers.dev';pass=localStorage.getItem('lullyPass')||'';mode=localStorage.getItem('lullyCloud')||'off'}catch(e){}
-  const NUMW=n=>n<=1?'one':n<=12?['','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve'][n]:n<=16?'fifteen':'twenty';
+  const btn=document.getElementById('cloud');let mode='off',url='https://lully-relay.jdustinstone.workers.dev',pass='',story=[],busy=false,queued=null;
+  try{url=localStorage.getItem('lullyRelay')||url;pass=localStorage.getItem('lullyPass')||'';mode=localStorage.getItem('lullyCloud')||'off'}catch(e){}
   function label(){btn.textContent=mode==='off'?'Cloud AI: off':mode==='fast'?'Cloud AI: Haiku (fast)':'Cloud AI: Sonnet (rich)'}
   function save(){try{localStorage.setItem('lullyRelay',url);localStorage.setItem('lullyPass',pass);localStorage.setItem('lullyCloud',mode)}catch(e){}}
   btn.addEventListener('click',()=>{
-    if(mode==='off'&&(!url||!pass)){
-      const u=url||prompt('Cloud relay address (ends in workers.dev):','https://');if(!u)return;
-      const p=prompt('Relay passcode:',pass||'');if(!p)return;url=u.trim().replace(/\/$/,'');pass=p.trim();
-    }
-    mode=mode==='off'?'fast':mode==='fast'?'rich':'off';save();label();showHit(btn.textContent);
+    if(mode==='off'&&!pass){const p=prompt('Relay passcode:','');if(!p)return;pass=p.trim()}
+    mode=mode==='off'?'fast':mode==='fast'?'rich':'off';save();label();showHit(btn.textContent);if(mode==='off')Painter.stop();
   });
-  btn.addEventListener('contextmenu',e=>{e.preventDefault();url='';pass='';mode='off';save();label();showHit('Cloud relay forgotten')});
+  btn.addEventListener('contextmenu',e=>{e.preventDefault();pass='';mode='off';save();label();Painter.stop();showHit('Cloud passcode forgotten')});
   label();
-  function apply(r){
-    if(!r||!Array.isArray(r.A)||!Array.isArray(r.B))return;
-    if(sceneSys!=='recipe'){sceneSys='recipe';document.getElementById('scenesys').textContent='Scenes: AI recipes'}
-    if(r.new_place)objs.forEach(o=>o.dying=true);
-    pullBackground([r.A,r.B],r.same_place?.5:.85);
-    const S=SCENES.recipe;if(typeof r.brightness==='number')S.b=Math.max(.25,Math.min(1,.3+r.brightness*.75));
-    if(typeof r.drift==='number')rcp.drift=Math.max(0,Math.min(1,r.drift));
-    if(r.flash)flash([255,255,255],.9);
-    for(const t of (r.things||[]).slice(0,3)){
-      if(!t||!t.name)continue;const n=Math.max(1,Math.min(20,+t.count||1));
-      const cols=(t.colors||[]).map(c=>String(c).toLowerCase()).join(' and ');
-      let name=String(t.name).toLowerCase();if(n>1&&!/s$/.test(name))name+='s';
-      parseSentence((NUMW(n)+' '+cols+' '+name).split(/\s+/),true);
-    }
-    prev={A:r.A,B:r.B,things:(r.things||[]).map(t=>t.name)};
-    aiEl.textContent='☁︎ Claude: '+(r.things||[]).map(t=>(t.count>1?t.count+' ':'')+t.name).join(', ')+(r.new_place?' · new place':'')+' · '+lastMs+' ms';
-  }
   async function send(sentence){
     if(busy){queued=sentence;return}busy=true;const t0=performance.now();
+    aiEl.textContent='🎨 Claude is imagining…';
     try{
-      const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pass,model:mode,story:story.join(' '),sentence,prev})});
-      lastMs=Math.round(performance.now()-t0);
+      const user=`Story so far: ${story.slice(0,-1).join(' ').slice(-2500)||'(this is the beginning)'}\nCurrent picture: ${Painter.title()||'none yet'}\nNewest sentence: ${sentence}`;
+      const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pass,model:mode,system:PAINT_PROMPT,user,max_tokens:900})});
+      const sec=((performance.now()-t0)/1000).toFixed(1);
       if(res.status===401){showHit('Cloud: wrong passcode');pass='';mode='off';save();label()}
-      else if(res.ok)apply(await res.json());
-      else showHit('Cloud error '+res.status);
+      else if(!res.ok){showHit('Cloud error '+res.status);aiEl.textContent='Cloud error '+res.status}
+      else{const r=await res.json(),txt=r.text||'';
+        const c=txt.match(/```(?:js|javascript)?\s*\n([\s\S]*?)(```|$)/),tm=txt.match(/TITLE:\s*(.+)/);
+        if(!c){aiEl.textContent='🎨 '+(Painter.title()||'no change')+' (kept) · '+sec+' s'}
+        else{const err=Painter.start(c[1],tm?tm[1].trim():'scene');
+          if(err){aiEl.textContent='🎨 painting failed ('+err.slice(0,40)+')'}
+          else{aiEl.textContent='🎨 Claude painted: '+Painter.title()+' · '+sec+' s';sceneEl.textContent=Painter.title();objs.forEach(o=>o.dying=true)}}}
     }catch(e){showHit('Cloud unreachable')}
     busy=false;if(queued){const q=queued;queued=null;send(q)}
   }
-  return{sentence(t){t=(t||'').trim();if(!t)return;story.push(t);if(story.length>60)story.shift();if(mode!=='off'&&url&&pass)send(t)}};
+  return{sentence(t){t=(t||'').trim();if(!t)return;story.push(t);if(story.length>80)story.shift();if(mode!=='off'&&pass)send(t)},on:()=>mode!=='off'};
 })();
-
 function parseSentence(raw,fromCloud){
   if(!fromCloud)Cloud.sentence(raw.join(' '));
   const ws=mergeThings(raw.map(norm).filter(Boolean));if(!ws.length)return;
@@ -959,6 +982,7 @@ function recipeStep(){
   // a clear change of place clears things that belonged to the old place (unless just mentioned)
   if(near&&near[1]>.45&&r.rel>.5){if(near[0]===rcpPending.k)rcpPending.n++;else{rcpPending.k=near[0];rcpPending.n=1}
     if(rcpPending.n>=3&&rcpPending.k!==rcpPlace){if(rcpPlace){placeChanged(now,'recipe');rcpPending.anchor=rcp.A.concat(rcp.B)}rcpPlace=rcpPending.k}}
+  if(Painter.active()||Cloud.on())return;
   if(current==='recipe')sceneEl.textContent='Story colors';
   const sw=(c)=>'#'+c.map(x=>Math.max(0,Math.min(255,x|0)).toString(16).padStart(2,'0')).join('');
   aiEl.textContent=`Recipe AI ${us} µs · about a place ${Math.round(r.rel*100)}% · colors ${sw(r.A)} + ${sw(r.B)} · `+Recipe.effects.filter(e=>r.fx[e]>.6).join(', ');
