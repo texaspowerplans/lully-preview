@@ -41,7 +41,7 @@ body.full .top,body.full .bottom{display:none}
 </head>
 <body>
 <div class="top">
-  <div><small>Lully blanket preview v19 · 4 × 5 ft · 320 LEDs</small><div id="scene">Ready</div><div id="layers"></div></div>
+  <div><small>Lully blanket preview v20 · 4 × 5 ft · 320 LEDs</small><div id="scene">Ready</div><div id="layers"></div></div>
   <div id="hit"></div>
 </div>
 <div id="stage"><canvas id="cv"></canvas><div id="fullhint"></div></div>
@@ -65,6 +65,7 @@ body.full .top,body.full .bottom{display:none}
     <button id="diff" class="ghost chip">Diffusion: plush</button>
     <button id="leds" class="ghost chip">Show LEDs</button>
     <button id="room" class="ghost chip">Room: dim</button>
+    <button id="cloud" class="ghost chip">Cloud AI: off</button>
   </div>
   <div class="row"><form id="typed"><input id="line" placeholder="Or type a line" autocomplete="off"><button class="ghost">Go</button></form></div>
 </div>
@@ -544,7 +545,7 @@ const OBJ={
 };
 const ALIAS={leaves:'leaf',snowflakes:'snowflake',flakes:'snowflake',raindrops:'raindrop',drops:'raindrop',petals:'petal',blossoms:'petal',feathers:'feather',bubbles:'bubble',embers:'ember',fireplace:'hearth',hearths:'hearth',lights:'light',beacon:'light',flame:'candle',torch:'lantern',clouds:'cloud',stars:'star',fireflies:'firefly',
   sparks:'spark',birds:'bird',balloons:'balloon',windows:'window',lanterns:'lantern',candles:'candle',lamps:'lamp',boats:'boat',ships:'ship',planets:'planet'};
-const COUNT={a:1,an:1,one:1,single:1,lone:1,solitary:1,only:1,two:2,pair:2,both:2,three:3,four:4,five:5,few:3,several:4,some:3,many:9,dozens:12,hundreds:14,countless:14,thousands:14};
+const COUNT={six:6,seven:7,eight:8,nine:9,ten:10,eleven:11,twelve:12,fifteen:15,twenty:20,a:1,an:1,one:1,single:1,lone:1,solitary:1,only:1,two:2,pair:2,both:2,three:3,four:4,five:5,few:3,several:4,some:3,many:9,dozens:12,hundreds:14,countless:14,thousands:14};
 const COLORW={white:[245,248,255],red:[255,50,40],blue:[60,130,255],green:[70,230,90],yellow:[255,230,70],orange:[255,140,30],pink:[255,120,190],
   purple:[170,80,255],gold:[255,200,70],golden:[255,200,70],silver:[215,225,240],grey:[160,165,175],gray:[160,165,175],black:[15,15,20],dark:[30,30,40],warm:[255,190,110],cold:[190,220,255]};
 const SIZEW={tiny:.5,little:.7,small:.7,big:1.5,large:1.5,huge:2,giant:2.2,enormous:2.3,fluffy:1.2,puffy:1.2,wispy:.9};
@@ -608,7 +609,56 @@ function placeFor(spec,mods,others){
     let d=99;for(const o of others)d=Math.min(d,Math.hypot(o.x-x,o.y-y));if(d>bd){bd=d;best=[x,y]}}
   return best;
 }
-function parseSentence(raw){
+// ---- Cloud AI (optional): sends each finished sentence's TEXT (never audio) to a private relay that asks Claude for a richer scene.
+// The on-device model keeps reacting instantly; Claude's answer blends in a second or two later.
+const Cloud=(function(){
+  const btn=document.getElementById('cloud');let mode='off',url='',pass='',story=[],prev=null,busy=false,queued=null,lastMs=0;
+  try{url=localStorage.getItem('lullyRelay')||'';pass=localStorage.getItem('lullyPass')||'';mode=localStorage.getItem('lullyCloud')||'off'}catch(e){}
+  const NUMW=n=>n<=1?'one':n<=12?['','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve'][n]:n<=16?'fifteen':'twenty';
+  function label(){btn.textContent=mode==='off'?'Cloud AI: off':mode==='fast'?'Cloud AI: Haiku (fast)':'Cloud AI: Sonnet (rich)'}
+  function save(){try{localStorage.setItem('lullyRelay',url);localStorage.setItem('lullyPass',pass);localStorage.setItem('lullyCloud',mode)}catch(e){}}
+  btn.addEventListener('click',()=>{
+    if(mode==='off'&&(!url||!pass)){
+      const u=prompt('Cloud relay address (from Cloudflare, ends in workers.dev):',url||'https://');if(!u)return;
+      const p=prompt('Relay passcode:',pass||'');if(!p)return;url=u.trim().replace(/\/$/,'');pass=p.trim();
+    }
+    mode=mode==='off'?'fast':mode==='fast'?'rich':'off';save();label();showHit(btn.textContent);
+  });
+  btn.addEventListener('contextmenu',e=>{e.preventDefault();url='';pass='';mode='off';save();label();showHit('Cloud relay forgotten')});
+  label();
+  function apply(r){
+    if(!r||!Array.isArray(r.A)||!Array.isArray(r.B))return;
+    if(sceneSys!=='recipe'){sceneSys='recipe';document.getElementById('scenesys').textContent='Scenes: AI recipes'}
+    if(r.new_place)objs.forEach(o=>o.dying=true);
+    pullBackground([r.A,r.B],r.same_place?.5:.85);
+    const S=SCENES.recipe;if(typeof r.brightness==='number')S.b=Math.max(.25,Math.min(1,.3+r.brightness*.75));
+    if(typeof r.drift==='number')rcp.drift=Math.max(0,Math.min(1,r.drift));
+    if(r.flash)flash([255,255,255],.9);
+    for(const t of (r.things||[]).slice(0,3)){
+      if(!t||!t.name)continue;const n=Math.max(1,Math.min(20,+t.count||1));
+      const cols=(t.colors||[]).map(c=>String(c).toLowerCase()).join(' and ');
+      let name=String(t.name).toLowerCase();if(n>1&&!/s$/.test(name))name+='s';
+      parseSentence((NUMW(n)+' '+cols+' '+name).split(/\s+/),true);
+    }
+    prev={A:r.A,B:r.B,things:(r.things||[]).map(t=>t.name)};
+    aiEl.textContent='☁︎ Claude: '+(r.things||[]).map(t=>(t.count>1?t.count+' ':'')+t.name).join(', ')+(r.new_place?' · new place':'')+' · '+lastMs+' ms';
+  }
+  async function send(sentence){
+    if(busy){queued=sentence;return}busy=true;const t0=performance.now();
+    try{
+      const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pass,model:mode,story:story.join(' '),sentence,prev})});
+      lastMs=Math.round(performance.now()-t0);
+      if(res.status===401){showHit('Cloud: wrong passcode');pass='';mode='off';save();label()}
+      else if(res.ok)apply(await res.json());
+      else showHit('Cloud error '+res.status);
+    }catch(e){showHit('Cloud unreachable')}
+    busy=false;if(queued){const q=queued;queued=null;send(q)}
+  }
+  return{sentence(t){t=(t||'').trim();if(!t)return;story.push(t);if(story.length>60)story.shift();if(mode!=='off'&&url&&pass)send(t)}};
+})();
+
+function parseSentence(raw,fromCloud){
+  if(!fromCloud)Cloud.sentence(raw.join(' '));
   const ws=mergeThings(raw.map(norm).filter(Boolean));if(!ws.length)return;
   const now=performance.now();
   // sentence-wide modifiers
@@ -1201,6 +1251,7 @@ document.getElementById('typed').addEventListener('submit',e=>{
   for(const w of v.split(/\s+/))feedWord(w);finalText+=' '+v;interim='';render();inp.value='';inp.blur();
 });
 }
+
 </script>
 </body>
 </html>
