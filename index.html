@@ -41,7 +41,7 @@ body.full .top,body.full .bottom{display:none}
 </head>
 <body>
 <div class="top">
-  <div><small>Lully blanket preview v27 · 4 × 5 ft · 320 LEDs</small><div id="scene">Ready</div><div id="layers"></div></div>
+  <div><small>Lully blanket preview v28 · 4 × 5 ft · 320 LEDs</small><div id="scene">Ready</div><div id="layers"></div></div>
   <div id="hit"></div>
 </div>
 <div id="stage"><canvas id="cv"></canvas><div id="fullhint"></div></div>
@@ -67,6 +67,7 @@ body.full .top,body.full .bottom{display:none}
     <button id="room" class="ghost chip">Room: bedtime lamp</button>
     <button id="cloud" class="ghost chip">Cloud AI: off</button>
     <button id="style" class="ghost chip">Style: soft glow</button>
+    <button id="blanket" class="ghost chip">Blanket: not connected</button>
   </div>
   <div class="row"><form id="typed"><input id="line" placeholder="Or type a line" autocomplete="off"><button class="ghost">Go</button></form></div>
 </div>
@@ -327,6 +328,7 @@ function frameBody(now){
   flashA*=Math.exp(-dt/0.18);
   if(typeof Mood!=='undefined')Mood.blend(buf,now);
   if(typeof Painter!=='undefined')Painter.blend(buf,now);
+  if(typeof Blanket!=='undefined')Blanket.send(buf,now);
   // draw
   const ad=aImg.data,bd=bImg.data,BW=COLS*S;let sr=0,sg=0,sb=0;
   const soft=v=>v<=0?0:v<190?v:190+65*(1-Math.exp(-(v-190)/65));
@@ -688,6 +690,37 @@ const Mood=(function(){
   }
   setFromStory([245,150,85],[225,105,115],.55,.2,{});
   return{blend,setFromStory,on:()=>on,toggle(){on=!on;return on},demo(A,B,br,dr,fx){setFromStory(A,B,br,dr,fx)},state:()=>({cur,motif,items:items.length})};
+})();
+
+// ---- Real blanket: send the LED colors to the ESP32 through a free public MQTT relay (works from https pages on iPhone) ----
+const Blanket=(function(){
+  const btn=document.getElementById('blanket');let client=null,code='',topic='',lastSend=0,ok=false;
+  try{code=localStorage.getItem('lullyBlanket')||''}catch(e){}
+  const out=new Uint8Array(N*3);
+  function label(t){btn.textContent=t}
+  function loadLib(){return new Promise((res,rej)=>{if(window.mqtt)return res();const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s)})}
+  async function connect(){
+    if(!code)return;label('Blanket: connecting…');
+    try{await loadLib()}catch(e){label('Blanket: could not load');return}
+    if(client)try{client.end(true)}catch(e){}
+    topic='lully/'+code+'/frame';
+    client=mqtt.connect('wss://broker.emqx.io:8084/mqtt',{clientId:'lully-app-'+Math.random().toString(16).slice(2,10),reconnectPeriod:2000,connectTimeout:8000});
+    client.on('connect',()=>{ok=true;label('Blanket: '+code+' ✓')});
+    client.on('close',()=>{ok=false;label('Blanket: reconnecting…')});
+    client.on('error',()=>{ok=false;label('Blanket: relay error')});
+  }
+  btn.addEventListener('click',()=>{
+    if(ok){const c=confirm('Blanket connected ('+code+').\nOK = run the layout test (rows light one at a time)\nCancel = disconnect');
+      if(c){client.publish(topic,'test')}else{try{client.end(true)}catch(e){}client=null;ok=false;code='';try{localStorage.removeItem('lullyBlanket')}catch(e){}label('Blanket: not connected')}return}
+    const c=prompt('Pairing code from the ESP32 setup page:',code||'lully-');if(!c)return;code=c.trim();try{localStorage.setItem('lullyBlanket',code)}catch(e){}connect();
+  });
+  if(code)connect();
+  function send(buf,now){
+    if(!ok||now-lastSend<100)return;lastSend=now;
+    for(let k=0;k<N*3;k++){let v=buf[k];v=v<=0?0:v<200?v:200+55*(1-Math.exp(-(v-200)/55));out[k]=v}
+    try{client.publish(topic,out,{qos:0})}catch(e){}
+  }
+  return{send,on:()=>ok};
 })();
 // ---- Cloud AI painter (optional): each finished sentence's TEXT (never audio) goes to a private relay.
 // Claude imagines the scene and writes a tiny light-painting program for the 16x20 grid; it runs sandboxed in a Web Worker.
