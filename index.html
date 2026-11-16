@@ -41,7 +41,7 @@ body.full .top,body.full .bottom{display:none}
 </head>
 <body>
 <div class="top">
-  <div><small>Lully blanket preview v26 · 4 × 5 ft · 320 LEDs</small><div id="scene">Ready</div><div id="layers"></div></div>
+  <div><small>Lully blanket preview v27 · 4 × 5 ft · 320 LEDs</small><div id="scene">Ready</div><div id="layers"></div></div>
   <div id="hit"></div>
 </div>
 <div id="stage"><canvas id="cv"></canvas><div id="fullhint"></div></div>
@@ -64,8 +64,9 @@ body.full .top,body.full .bottom{display:none}
     <button id="eng" class="ghost chip">Engine</button>
     <button id="diff" class="ghost chip">Diffusion: plush</button>
     <button id="leds" class="ghost chip">Show LEDs</button>
-    <button id="room" class="ghost chip">Room: dim</button>
+    <button id="room" class="ghost chip">Room: bedtime lamp</button>
     <button id="cloud" class="ghost chip">Cloud AI: off</button>
+    <button id="style" class="ghost chip">Style: soft glow</button>
   </div>
   <div class="row"><form id="typed"><input id="line" placeholder="Or type a line" autocomplete="off"><button class="ghost">Go</button></form></div>
 </div>
@@ -227,7 +228,7 @@ const amt={stars:0,fall:0,waves:0,drift:0,flick:0,caustic:0,sparkle:0};
 const L={};for(const k in LAYERS)L[k]=0;
 const layerOn={};for(const k in LAYERS)layerOn[k]=false;
 let effectsMode='off';
-const ROOM=[{l:'Room: dim',a:.4},{l:'Room: dark',a:.14},{l:'Room: lights on',a:.85}];let roomI=0;
+const ROOM=[{l:'Room: bedtime lamp',a:.22},{l:'Room: dark',a:.1},{l:'Room: lights on',a:.7}];let roomI=0;
 let fadeTau=.8,idle=0,idleTarget=0,fxScale=.6,layerScale=.8;
 let target=SCENES.calm,current='calm',flashA=0,flashC=[255,255,255],nextBolt=0,hot=.15,showLeds=false,mood=0,moodT=-1e9;
 const isStar=new Uint8Array(N),ph=new Float32Array(N),spark=new Float32Array(N),fl=new Float32Array(N),buf=new Float32Array(N*3);
@@ -324,6 +325,7 @@ function frameBody(now){
   fxFrame(dt,t,now);
   ripples=ripples.filter(p=>{p.r+=p.speed*dt;p.life*=Math.exp(-dt/0.7);return p.life>.02&&p.r<40});
   flashA*=Math.exp(-dt/0.18);
+  if(typeof Mood!=='undefined')Mood.blend(buf,now);
   if(typeof Painter!=='undefined')Painter.blend(buf,now);
   // draw
   const ad=aImg.data,bd=bImg.data,BW=COLS*S;let sr=0,sg=0,sb=0;
@@ -623,6 +625,70 @@ function placeFor(spec,mods,others){
     let d=99;for(const o of others)d=Math.min(d,Math.hypot(o.x-x,o.y-y));if(d>bd){bd=d;best=[x,y]}}
   return best;
 }
+// ---- Glow style: a mostly-lit, softly alive blanket (broad warm glows through sherpa), with a few large slow motifs ----
+const Mood=(function(){
+  const h1=n=>{const v=Math.sin(n*127.1+311.7)*43758.5453;return v-Math.floor(v)};
+  const h3=(x,y,z)=>h1(x*157+y*113+z*271),sm=t=>t*t*(3-2*t);
+  function noise(x,y,z){const X=Math.floor(x),Y=Math.floor(y),Z=Math.floor(z),fx=sm(x-X),fy=sm(y-Y),fz=sm(z-Z),L=(a,b,t)=>a+(b-a)*t;
+    return L(L(L(h3(X,Y,Z),h3(X+1,Y,Z),fx),L(h3(X,Y+1,Z),h3(X+1,Y+1,Z),fx),fy),L(L(h3(X,Y,Z+1),h3(X+1,Y,Z+1),fx),L(h3(X,Y+1,Z+1),h3(X+1,Y+1,Z+1),fx),fy),fz)}
+  // seamless (wrap-around) noise so the blanket has no edges, top or bottom
+  function tnoise(x,y,z){const u=x/COLS,v=y/ROWS,a=noise(x,y,z),b=noise(x-COLS,y,z),c=noise(x,y-ROWS,z),d=noise(x-COLS,y-ROWS,z);return (a*(1-u)+b*u)*(1-v)+(c*(1-u)+d*u)*v}
+  const MOTIF={
+    leaf:{cols:[[235,120,30],[200,60,25],[245,175,45],[160,40,30],[225,95,20]],size:2.6,n:6,life:11,v:[.22,.12],sway:.5,stretch:1.6,spin:.25},
+    petal:{cols:[[250,150,180],[240,110,160],[255,200,215],[230,140,200]],size:2.2,n:6,life:10,v:[.18,.1],sway:.6,stretch:1.4,spin:.3},
+    flake:{cols:[[225,235,255],[190,215,255],[245,245,255]],size:1.9,n:7,life:12,v:[.14,.05],sway:.35,stretch:1,spin:0},
+    ember:{cols:[[255,140,30],[255,90,20],[255,190,70]],size:1.7,n:7,life:6,v:[-.35,.08],sway:.25,stretch:1.2,spin:0,flicker:1},
+    star:{cols:[[255,240,200],[220,230,255],[255,220,150]],size:1.5,n:7,life:14,v:[0,0],sway:0,stretch:1,spin:0,twinkle:1},
+    firefly:{cols:[[200,255,90],[240,240,110]],size:1.5,n:6,life:9,v:[.05,.05],sway:.8,stretch:1,spin:0,blink:1},
+    bubble:{cols:[[120,230,255],[170,200,255],[140,255,230]],size:2,n:6,life:9,v:[-.25,.05],sway:.4,stretch:1,spin:0},
+    cloud:{cols:[[235,235,245],[210,220,240]],size:3.6,n:3,life:18,v:[.12,.12],sway:0,stretch:1.7,spin:0}};
+  const FX2MOTIF={leaf:'leaf',petal:'petal',snowflake:'flake',ember:'ember',hearth:'ember',star:'star',firefly:'firefly',bubble:'bubble',cloud:'cloud'};
+  let sleepUntil=0,on=true,cur=null,tgt=null,motif=null,motifHold=0,last=0,T=0,dir=Math.random()*6.28;const items=[];
+  const blobs=Array.from({length:6},(_,i)=>({x:Math.random()*16,y:Math.random()*20,vx:(Math.random()-.5)*.3,vy:(Math.random()-.5)*.3,r:4+Math.random()*2.5,ci:i%4,ph:Math.random()*6.28}));
+  const lerp=(a,b,k)=>a+(b-a)*k,lc=(a,b,k)=>[lerp(a[0],b[0],k),lerp(a[1],b[1],k),lerp(a[2],b[2],k)];
+  function rich(c,amt){const l=(c[0]+c[1]+c[2])/3;let o=c.map(x=>Math.max(0,l+(x-l)*amt));const mx=Math.max(1,...o),k=225/mx;return o.map(x=>Math.min(255,x*k))}
+  function setFromStory(A,B,br,drift,fx){
+    // a 4-color palette from the story's two colors: rich versions plus a blend and a warm/deep companion
+    const a=rich(A,1.35),b=rich(B,1.35),m=lc(a,b,.5),w=lc(a,[255,190,120],.25);
+    let txt='',cs='';try{txt=recent.slice(-14).join(' ').toLowerCase();cs=current}catch(e){}const nw=performance.now();
+    if(/good ?night|sleep tight|sweet dreams|fell asleep|fast asleep|close your eyes|drifted off to sleep|time for bed|the end/.test(txt))sleepUntil=nw+60000;
+    const sleepy=nw<sleepUntil||cs==='sleep';
+    tgt={pal:[a,rich(m,1.1),b,rich(w,1.1)],bright:sleepy?.28:Math.max(.3,Math.min(.95,.3+br*.7)),speed:sleepy?.3:.45+drift*1.1};
+    if(!cur)cur=JSON.parse(JSON.stringify(tgt));
+    let best=null,bp=.62;for(const k in FX2MOTIF){const p=fx&&fx[k];if(p>bp){bp=p;best=FX2MOTIF[k]}}
+    const now=performance.now();if(best){motif=best;motifHold=now+14000}else if(now>motifHold)motif=null;
+  }
+  function spawn(){const M=MOTIF[motif];if(!M)return;let bx=0,by=0,bd=-1;
+    for(let k=0;k<8;k++){const x=Math.random()*COLS,y=Math.random()*ROWS;let d=99;for(const o of items){const dx=Math.min(Math.abs(o.x-x),COLS-Math.abs(o.x-x)),dy=Math.min(Math.abs(o.y-y),ROWS-Math.abs(o.y-y));d=Math.min(d,Math.hypot(dx,dy))}if(d>bd){bd=d;bx=x;by=y}}
+    items.push({kind:motif,x:bx,y:by,born:T,life:M.life*(.8+Math.random()*.4),c:M.cols[Math.floor(Math.random()*M.cols.length)],s:M.size*(.85+Math.random()*.3),rot:Math.random()*6.28,ph:Math.random()*6.28})}
+  function blend(buf,now){
+    if(!on||!cur)return;const dt=Math.min(.1,(now-(last||now))/1000);last=now;T+=dt;
+    const k=1-Math.exp(-dt/3.2);for(let i=0;i<4;i++)cur.pal[i]=lc(cur.pal[i],tgt.pal[i],k);cur.bright=lerp(cur.bright,tgt.bright,k);cur.speed=lerp(cur.speed,tgt.speed,k);
+    const sp=cur.speed,P=cur.pal;
+    for(const b of blobs){b.x=(b.x+b.vx*sp*dt+COLS)%COLS;b.y=(b.y+b.vy*sp*dt+ROWS)%ROWS}
+    // motifs: a few large ones, spaced apart, fading in and out slowly
+    const M=MOTIF[motif];if(M){const alive=items.filter(o=>o.kind===motif&&T-o.born<o.life-2).length;if(alive<M.n&&Math.random()<dt*.9)spawn()}
+    for(let i=items.length-1;i>=0;i--){const o=items[i],m=MOTIF[o.kind],age=T-o.born;if(age>o.life){items.splice(i,1);continue}
+      const cd=Math.cos(dir),sd=Math.sin(dir);o.x=(o.x+(m.v[0]*cd-m.v[1]*sd)*sp*dt+Math.sin(T*.6+o.ph)*m.sway*dt+COLS)%COLS;
+      o.y=(o.y+(m.v[0]*sd+m.v[1]*cd)*sp*dt+ROWS)%ROWS;o.rot+=m.spin*dt*Math.sin(T*.3+o.ph)}
+    const motifDim=items.length?.72:1;let k3=0;
+    for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++,k3+=3){
+      const u=tnoise(x*.17,y*.17,T*.035*sp),v=.66+.34*tnoise(x*.23+7,y*.23,T*.05*sp+9);
+      const q=Math.max(0,Math.min(.999,u*1.25-.12))*3,i0=Math.floor(q),f=sm(q-i0),c=lc(P[i0],P[Math.min(3,i0+1)],f);
+      let r=c[0]*v*.78,g=c[1]*v*.78,b=c[2]*v*.78;
+      for(const bl of blobs){const dx=Math.min(Math.abs(bl.x-x),COLS-Math.abs(bl.x-x)),dy=Math.min(Math.abs(bl.y-y),ROWS-Math.abs(bl.y-y)),d2=dx*dx+dy*dy;
+        if(d2>bl.r*bl.r*4)continue;const w=Math.exp(-d2/(bl.r*bl.r))*(.3+.3*Math.sin(T*.11*sp+bl.ph)),pc=P[bl.ci];r+=pc[0]*w;g+=pc[1]*w;b+=pc[2]*w}
+      r*=motifDim;g*=motifDim;b*=motifDim;
+      for(const o of items){const m=MOTIF[o.kind];let dx=x-o.x,dy=y-o.y;dx-=COLS*Math.round(dx/COLS);dy-=ROWS*Math.round(dy/ROWS);
+        if(dx*dx+dy*dy>o.s*o.s*6)continue;const cr=Math.cos(o.rot),sr=Math.sin(o.rot),ax=(dx*cr+dy*sr)/(o.s*m.stretch*.75),ay=(-dx*sr+dy*cr)/(o.s*.75);
+        const age=T-o.born;let a=Math.min(1,age/2.5,(o.life-age)/2.5);a=a<0?0:sm(a);
+        if(m.flicker)a*=.7+.3*Math.sin(T*9+o.ph*5)*Math.sin(T*5.3+o.ph);if(m.twinkle)a*=.6+.4*Math.sin(T*1.3+o.ph*3);if(m.blink)a*=Math.max(0,Math.sin(T*.9+o.ph*2))**2;
+        const w=Math.exp(-(ax*ax+ay*ay))*a*.9;r+=(o.c[0]-r)*w;g+=(o.c[1]-g)*w;b+=(o.c[2]-b)*w}
+      const B=cur.bright;buf[k3]=r*B;buf[k3+1]=g*B;buf[k3+2]=b*B}
+  }
+  setFromStory([245,150,85],[225,105,115],.55,.2,{});
+  return{blend,setFromStory,on:()=>on,toggle(){on=!on;return on},demo(A,B,br,dr,fx){setFromStory(A,B,br,dr,fx)},state:()=>({cur,motif,items:items.length})};
+})();
 // ---- Cloud AI painter (optional): each finished sentence's TEXT (never audio) goes to a private relay.
 // Claude imagines the scene and writes a tiny light-painting program for the 16x20 grid; it runs sandboxed in a Web Worker.
 // The on-device model keeps reacting instantly until Claude's painting fades in.
@@ -668,6 +734,8 @@ setInterval(()=>{const t=(performance.now()-t0)/1000;let k=0;
   }
   return{start,blend,mode:()=>mode,stop(){if(active&&!fadeOutAt)fadeOutAt=performance.now()},title:()=>title,active:()=>active};
 })();
+window.LullyMood=Mood;
+document.getElementById('style').addEventListener('click',e=>{const o=Mood.toggle();e.target.textContent=o?'Style: soft glow':'Style: classic'});
 const Cloud=(function(){
   const btn=document.getElementById('cloud');let mode='off',url='https://lully-relay.jdustinstone.workers.dev',pass='',story=[],busy=false,queued=null;
   try{url=localStorage.getItem('lullyRelay')||url;pass=localStorage.getItem('lullyPass')||'';mode=localStorage.getItem('lullyCloud')||'off'}catch(e){}
@@ -979,6 +1047,9 @@ function recipeStep(){
   if(!rcpPending.anchor)rcpPending.anchor=rcp.A.concat(rcp.B);
   const moved=Math.hypot(rcp.A[0]-rcpPending.anchor[0],rcp.A[1]-rcpPending.anchor[1],rcp.A[2]-rcpPending.anchor[2])+Math.hypot(rcp.B[0]-rcpPending.anchor[3],rcp.B[1]-rcpPending.anchor[4],rcp.B[2]-rcpPending.anchor[5]);
   if(current==='recipe'&&moved>130){placeChanged(now,'recipe');rcpPending.anchor=rcp.A.concat(rcp.B)}
+  if(r.rel>.5&&!(asleep&&now-sceneSince<8000)||!Mood.state().cur){
+    Mood.setFromStory(r.rel>.5?r.A:[230,140,80],r.rel>.5?r.B:[200,90,110],r.rel>.5?r.br:.6,r.rel>.5?r.drift:.25,r.fx);
+  }
   if(r.rel>.5&&!(asleep&&now-sceneSince<8000)){
     const w=Math.min(.4,.3*r.rel)*(now<(rcpPending.bgHoldUntil||0)?.2:1);
     const before=rcp.A.slice();
