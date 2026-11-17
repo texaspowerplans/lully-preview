@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Lully Glimmer</title>
+<meta name="theme-color" content="#120d0b">
+<style>
+:root{--bg:#120d0b;--panel:#1d1714;--ink:#f3e9df;--quiet:#b6a497;--accent:#f0a24a}
+*{box-sizing:border-box}
+body{margin:0 auto;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,system-ui,Segoe UI,Roboto,sans-serif;padding:calc(env(safe-area-inset-top) + 4px) 16px 48px;max-width:520px}
+header{display:flex;align-items:baseline;justify-content:space-between;padding:12px 0 10px}
+h1{font-size:22px;margin:0;font-weight:650}
+h1 span{color:var(--accent)}
+.sub{color:var(--quiet);font-size:13px}
+#stage{position:relative;aspect-ratio:1/1;border-radius:22px;overflow:hidden;background:#0b0807;box-shadow:0 0 0 1px #2a211c inset}
+#c{width:100%;height:100%;display:block;filter:blur(9px) saturate(1.1);transform:scale(1.1)}
+.pill{position:absolute;font-size:12px;color:#e6d6c8;background:#000a;padding:3px 9px;border-radius:10px}
+#phase{left:12px;top:10px}
+#accent{right:12px;bottom:10px;opacity:0;transition:opacity .4s}
+#mic{left:12px;bottom:10px;display:none}
+button{font:inherit;border:0;border-radius:14px;padding:14px 16px;background:var(--panel);color:var(--ink);cursor:pointer}
+#go{width:100%;margin-top:14px;background:var(--accent);color:#2a1606;font-weight:650;font-size:18px}
+#go.stop{background:#3a2c25;color:var(--ink)}
+#blanket{width:100%;margin-top:10px;font-size:14px}
+#status{color:var(--quiet);font-size:13px;margin-top:10px;min-height:18px}
+#heard{font-size:14px;margin-top:4px;min-height:40px;color:#e6d6c8;overflow-wrap:anywhere}
+#heard i{color:var(--quiet);font-style:normal}
+#meter{height:4px;border-radius:2px;background:#2a211c;margin-top:8px;overflow:hidden}
+#meter div{height:100%;width:0;background:var(--accent);transition:width .08s}
+details{margin-top:12px;background:var(--panel);border-radius:14px;padding:2px 14px}
+summary{padding:12px 0;cursor:pointer}
+label{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 0;font-size:14px;color:#e6d6c8}
+input[type=text]{flex:1;min-width:0;font:inherit;font-size:15px;padding:8px 10px;border-radius:10px;border:1px solid #3a2e27;background:#120d0b;color:var(--ink)}
+input[type=range]{flex:1;max-width:60%}
+input[type=checkbox]{width:22px;height:22px}
+select{font:inherit;background:#120d0b;color:var(--ink);border:1px solid #3a2e27;border-radius:10px;padding:6px}
+.try{display:flex;flex-wrap:wrap;gap:6px;padding:2px 0 8px}
+.try button{padding:8px 10px;font-size:13px;background:#2a211c;border-radius:10px}
+#warn{display:none;background:#3b1f14;color:#ffd9c2;padding:10px 12px;border-radius:12px;margin-top:10px;font-size:14px}
+.note{color:var(--quiet);font-size:12.5px;padding:2px 0 12px}
+a{color:var(--accent)}
+</style></head>
+<body>
+<header><h1>Lully <span>Glimmer</span></h1><div class="sub">listening blanket · v2</div></header>
+<div id="stage"><canvas id="c" width="16" height="20"></canvas><div class="pill" id="phase">Asleep</div><div class="pill" id="mic">🎙 listening</div><div class="pill" id="accent"></div></div>
+<div id="meter"><div></div></div>
+<button id="go">Start story time</button>
+<button id="blanket">Blanket: not connected</button>
+<div id="warn"></div>
+<div id="status">Tap Start, allow the microphone, then read a story out loud.</div>
+<div id="heard"></div>
+<details><summary>Try it without reading</summary>
+  <div class="try" id="tryBtns"></div>
+  <label><input type="text" id="typed" placeholder="Type a sentence and press Enter" enterkeyhint="send"></label>
+</details>
+<details><summary>Settings</summary>
+  <label>Child's name <input type="text" id="name" placeholder="optional" autocomplete="off"></label>
+  <label>Stories tonight <select id="stories"><option>1</option><option selected>2</option><option>3</option></select></label>
+  <label>Brightness <input type="range" id="bright" min="20" max="100" value="80"></label>
+  <label>Quick demo (a whole night in about 4 min) <input type="checkbox" id="quick"></label>
+  <label>Two readers taking turns <input type="checkbox" id="two"></label>
+  <div class="note" id="privacy">Listening happens on this phone. The speech model (about 40 MB) downloads once. No audio is recorded or sent anywhere; only light colors go to the blanket.</div>
+</details>
+<p class="note" style="margin-top:14px">Lully Glimmer is the clean-slate version: it reacts to the reader's voice, magic words and the story's mood, and walks the child to sleep. The original Lully is <a href="./">here</a>. Both use the same blanket pairing code.</p>
+
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const W=16,H=20,N=W*H;
+const clamp=(v,a,b)=>v<a?a:v>b?b:v,lerp=(a,b,k)=>a+(b-a)*k;
+const sm=(a,b,x)=>{const t=clamp((x-a)/(b-a),0,1);return t*t*(3-2*t)};
+const hash=n=>{const s=Math.sin(n*127.1+311.7)*43758.5453;return s-Math.floor(s)};
+const h3=(x,y,z)=>hash(x*157+y*113+z*271);
+const sq=t=>t*t*(3-2*t);
+function noise(x,y,z){const X=Math.floor(x),Y=Math.floor(y),Z=Math.floor(z),fx=sq(x-X),fy=sq(y-Y),fz=sq(z-Z),L=lerp;
+  return L(L(L(h3(X,Y,Z),h3(X+1,Y,Z),fx),L(h3(X,Y+1,Z),h3(X+1,Y+1,Z),fx),fy),L(L(h3(X,Y,Z+1),h3(X+1,Y,Z+1),fx),L(h3(X,Y+1,Z+1),h3(X+1,Y+1,Z+1),fx),fy),fz)}
+const g2=(du,dv,s)=>Math.exp(-(du*du+dv*dv)/(s*s));
+function hsv(h,s,v){h=((h%1)+1)%1;const i=Math.floor(h*6),f=h*6-i,p=v*(1-s),q=v*(1-f*s),u=v*(1-(1-f)*s);return [[v,u,p],[q,v,p],[p,v,u],[p,q,v],[u,p,v],[v,p,q]][i%6]}
+
+// Blanket geometry: radial. The middle (where a wrapped-up child sits) is "home"; the edges are the story world.
+const U=new Float32Array(N),V=new Float32Array(N),R=new Float32Array(N);
+for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;U[i]=(x+.5)/W*2-1;V[i]=(y+.5)/H*2-1;R[i]=Math.hypot(U[i],V[i])/Math.SQRT2}
+
+// ---------------- Settings ----------------
+const set={name:'',stories:2,bright:80,quick:false,two:false};
+try{Object.assign(set,JSON.parse(localStorage.getItem('glimmerSettings')||'{}'))}catch(e){}
+function saveSet(){try{localStorage.setItem('glimmerSettings',JSON.stringify(set))}catch(e){}}
+$('name').value=set.name;$('stories').value=String(set.stories);$('bright').value=set.bright;$('quick').checked=set.quick;$('two').checked=set.two;
+$('name').oninput=e=>{set.name=e.target.value.trim().toLowerCase();saveSet()};
+$('stories').onchange=e=>{set.stories=+e.target.value;saveSet()};
+$('bright').oninput=e=>{set.bright=+e.target.value;saveSet()};
+$('quick').onchange=e=>{set.quick=e.target.checked;saveSet()};
+$('two').onchange=e=>{set.two=e.target.checked;saveSet()};
+const Q=()=>set.quick?0.12:1;   // time scale for the Sleep Tide
+
+// ---------------- UI helpers ----------------
+let accentTimer=0;
+function showAccent(t){const el=$('accent');el.textContent=t;el.style.opacity=1;clearTimeout(accentTimer);accentTimer=setTimeout(()=>el.style.opacity=0,2200)}
+function status(s){$('status').textContent=s}
+function say(s){const w=$('warn');w.style.display=s?'block':'none';w.textContent=s||''}
+let heardFinal='',heardPartial='';
+function renderHeard(){const f=heardFinal.slice(-120);$('heard').innerHTML='';const a=document.createElement('span');a.textContent=f+' ';const b=document.createElement('i');b.textContent=heardPartial;$('heard').append(a,b)}
+
+// ---------------- Voice analysis (raw microphone) ----------------
+const Voice={ready:false,env:0,fast:0,slow:0,floor:.003,avg:.02,active:false,voiced:false,pitch:0,pitchRef:180,loud:.5,whisperAcc:0,whisper:false,
+  presence:0,onsets:[],lastOnset:0,activeFor:0,lastActive:0,inactiveSince:0,seg:{start:0,pitches:[],onsets:0,words:0},clusters:[],side:0,
+  pitchHist:[],risingAt:-1e9};
+let ac=null,stream=null,src=null,an=null,tbuf=null,dbuf=null;
+let sim={until:0,loud:.5,whisper:false,pitch:0};   // simulated voice for the "try" buttons
+function detectPitch(b,sr){ // normalized autocorrelation on a 2x-downsampled window
+  const n=b.length>>1;if(!dbuf||dbuf.length!==n)dbuf=new Float32Array(n);
+  for(let i=0;i<n;i++)dbuf[i]=(b[2*i]+b[2*i+1])*.5;
+  const s2=sr/2,minL=Math.floor(s2/650),maxL=Math.min(n>>1,Math.floor(s2/75)),win=n-maxL;
+  let best=0,bestL=0;const cs=new Float32Array(maxL+1);
+  for(let L=minL;L<=maxL;L++){let s=0,e1=0,e2=0;for(let i=0;i<win;i++){const a=dbuf[i],c=dbuf[i+L];s+=a*c;e1+=a*a;e2+=c*c}
+    const c=s/Math.sqrt(e1*e2+1e-12);cs[L]=c;if(c>best){best=c;bestL=L}}
+  if(best<.6)return 0;
+  for(let L=minL;L<bestL;L++)if(cs[L]>best*.92&&cs[L]>=cs[L-1]&&cs[L]>=cs[L+1]){bestL=L;break}   // avoid octave-down errors
+  return s2/bestL;
+}
+const median=a=>{if(!a.length)return 0;const s=a.slice().sort((x,y)=>x-y);return s[s.length>>1]};
+function voiceTick(dt,now){
+  const V=Voice;let rms=0,pitch=0,activeNow=false,voicedNow=false;
+  if(an){an.getFloatTimeDomainData(tbuf);let s=0;for(let i=0;i<tbuf.length;i++)s+=tbuf[i]*tbuf[i];rms=Math.sqrt(s/tbuf.length)}
+  V.fast+= (rms-V.fast)*Math.min(1,dt/.03);V.slow+=(rms-V.slow)*Math.min(1,dt/.15);V.env=V.fast;
+  if(rms<V.floor*1.3)V.floor=lerp(V.floor,Math.max(rms,1e-4),Math.min(1,dt/1.5));else V.floor*=1+dt*.02;
+  V.floor=clamp(V.floor,8e-5,.05);
+  const thrOn=Math.max(V.floor*3.2,.0018),thrOff=Math.max(V.floor*2.2,.0012);
+  activeNow=an?(V.active?V.env>thrOff:V.env>thrOn):false;
+  if(activeNow&&an){pitch=detectPitch(tbuf,ac.sampleRate);voicedNow=pitch>0}
+  // simulated voice from the try buttons
+  if(now<sim.until){activeNow=true;voicedNow=!sim.whisper;pitch=sim.pitch||V.pitchRef;}
+  // loudness relative to this reader's usual voice
+  if(voicedNow&&now>=sim.until)V.avg=lerp(V.avg,V.env,Math.min(1,dt/4));
+  let loud=now<sim.until?sim.loud:clamp(.5+Math.log2((V.env+1e-6)/(V.avg+1e-6))/3,0,1);
+  V.loud=lerp(V.loud,activeNow?loud:.3,Math.min(1,dt/.2));
+  // whisper: active but breathy (no pitch) for a while
+  V.whisperAcc=clamp(V.whisperAcc+(activeNow&&!voicedNow?dt:-dt*2),0,.7);
+  V.whisper=V.whisperAcc>.35;
+  if(voicedNow){V.pitch=lerp(V.pitch||pitch,pitch,.35);V.seg.pitches.push(pitch);V.pitchHist.push([now,pitch]);if(V.seg.pitches.length>400)V.seg.pitches.shift();
+    if(now>=sim.until)V.pitchRef=lerp(V.pitchRef,pitch,Math.min(1,dt/8))}
+  while(V.pitchHist.length&&now-V.pitchHist[0][0]>1500)V.pitchHist.shift();
+  // syllable onsets
+  if(activeNow&&V.fast>V.slow*1.5&&V.fast>thrOn&&now-V.lastOnset>130){V.lastOnset=now;V.onsets.push(now);V.seg.onsets++;onOnset()}
+  if(now<sim.until&&now-V.lastOnset>(sim.whisper?600:280)){V.lastOnset=now;V.onsets.push(now);V.seg.onsets++;onOnset()}
+  while(V.onsets.length&&now-V.onsets[0]>2000)V.onsets.shift();
+  // segments (a stretch of continuous voice)
+  if(activeNow&&!V.active){segStart(now)}
+  if(!activeNow&&V.active){segEnd(now)}
+  V.active=activeNow;V.voiced=voicedNow;
+  V.activeFor=activeNow?V.activeFor+dt:0;if(activeNow)V.lastActive=now;
+  V.presence=lerp(V.presence,activeNow?1:0,Math.min(1,dt/(activeNow?.12:1.2)));
+  // two readers: which voice is this?
+  if(set.two&&activeNow&&V.seg.pitches.length>12&&V.clusters.length===2){const m=median(V.seg.pitches.slice(-40)),c=V.clusters;
+    const sep=c[1].p/c[0].p;if(sep>1.3)V.side=Math.abs(Math.log(m/c[0].p))<Math.abs(Math.log(m/c[1].p))?-1:1}
+  if(!set.two)V.side=0;
+  $('meter').firstChild.style.width=(V.presence*(V.whisper?25:30+V.loud*70)).toFixed(0)+'%';
+}
+function segStart(now){const V=Voice,pause=(now-V.inactiveSince)/1000;
+  V.seg={start:now,pitches:[],onsets:0,words:0};
+  // stuck on a word: a mid-sentence pause (the recognizer did not close the sentence), then reading continues
+  if(V.inactiveSince&&pause>1.2&&pause<5&&pausePartial&&!finalDuringPause&&now-lastGlint>40000&&inStory()){lastGlint=now;trigger('glint',{force:true})}
+  // the child answers a question
+  if(Think.on&&now-Think.since>800){Think.on=false;trigger('sparkle',{force:true})}
+}
+let pausePartial=false,finalDuringPause=false,lastGlint=0,lastYawn=0;
+function segEnd(now){const V=Voice,s=V.seg,dur=(now-s.start)/1000;
+  V.inactiveSince=now;pausePartial=!!curPartial.length;finalDuringPause=false;
+  if(s.pitches.length>15){const m=median(s.pitches);
+    if(set.two){const c=V.clusters;if(c.length<2){c.push({p:m,n:1});if(c.length===2&&c[0].p>c[1].p)c.reverse()}
+      else{const k=Math.abs(Math.log(m/c[0].p))<Math.abs(Math.log(m/c[1].p))?0:1;c[k].n++;c[k].p=lerp(c[k].p,m,1/Math.min(c[k].n,10));if(c[0].p>c[1].p)c.reverse()}}}
+  // rising pitch at the end of a phrase = probably a question
+  const ph=V.pitchHist;if(ph.length>8){const a=median(ph.slice(0,ph.length>>1).map(p=>p[1])),b=median(ph.slice(-4).map(p=>p[1]));if(b>a*1.15)V.risingAt=now}
+  V.pitchHist=[];
+  // a yawn: one long breath-sound with no words in it
+  if(dur>1.3&&dur<4&&s.onsets<=2&&s.words===0&&now-lastYawn>90000&&an&&inStory()){lastYawn=now;doYawn('a yawn')}
+}
+
+// ---------------- Speech (words) ----------------
+let rec=null,voskModel=null,voskRec=null,proc=null,engine='',running=false,wakeLock=null;
+let curPartial=[];
+const VOSK_JS='https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js';
+const MODEL_URL='https://ccoreilly.github.io/vosk-browser/models/vosk-model-small-en-us-0.15.tar.gz';
+function loadScript(u){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=u;s.onload=res;s.onerror=()=>rej(new Error('could not load '+u));document.head.append(s)})}
+const norm=t=>(' '+t.toLowerCase().replace(/good\s+night/g,'goodnight').replace(/[^a-z' ]+/g,' ')+' ').replace(/\s+/g,' ');
+function partialWords(ws){const prev=curPartial;for(let j=0;j<ws.length;j++)if(prev[j]!==ws[j]){heardWord(ws[j]);Voice.seg.words++}curPartial=ws;heardPartial=ws.join(' ');renderHeard()}
+function finalText(t){const ws=t.trim().split(/\s+/).filter(Boolean);for(let j=0;j<ws.length;j++)if(curPartial[j]!==ws[j])heardWord(ws[j]);
+  curPartial=[];heardPartial='';if(ws.length){heardFinal+=' '+ws.join(' ');finalDuringPause=true;heardSentence(ws.join(' '))}renderHeard()}
+async function startMic(){
+  ac=new (window.AudioContext||window.webkitAudioContext)();if(ac.resume)await ac.resume();
+  status('Asking for the microphone…');
+  stream=await navigator.mediaDevices.getUserMedia({video:false,audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false,channelCount:1}});
+  src=ac.createMediaStreamSource(stream);an=ac.createAnalyser();an.fftSize=2048;tbuf=new Float32Array(an.fftSize);src.connect(an);Voice.ready=true;
+  $('mic').style.display='block';
+  status('Glimmer can hear you. Loading the word listener (about 40 MB the first time)…');
+  try{
+    if(!voskModel){if(!window.Vosk)await loadScript(VOSK_JS);voskModel=await Vosk.createModel(MODEL_URL)}
+    if(!running)return;
+    voskRec=new voskModel.KaldiRecognizer(ac.sampleRate);engine='vosk';
+    voskRec.on('partialresult',m=>{const p=(m.result.partial||'').trim();if(p)partialWords(p.split(/\s+/))});
+    voskRec.on('result',m=>finalText(m.result.text||''));
+    proc=ac.createScriptProcessor(4096,1,1);proc.onaudioprocess=e=>{try{voskRec&&voskRec.acceptWaveform(e.inputBuffer)}catch(_){}};
+    src.connect(proc);proc.connect(ac.destination);
+    status('Listening. Start reading whenever you like.');
+  }catch(err){
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(SR){engine='web';startWeb(SR);$('privacy').textContent='The on-device word listener could not load, so words go through the browser’s speech service. The voice glow still runs on this phone.';status('Listening (browser speech).')}
+    else status('Words are unavailable here, but Glimmer still follows your voice.');
+  }
+}
+function startWeb(SR){
+  rec=new SR();rec.lang='en-US';rec.continuous=true;rec.interimResults=true;const seen={};
+  rec.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){const r=e.results[i],ws=r[0].transcript.trim().toLowerCase().split(/\s+/);
+    if(r.isFinal){curPartial=seen[i]||[];finalText(ws.join(' '))}else{curPartial=seen[i]||[];partialWords(ws)}seen[i]=ws}};
+  rec.onend=()=>{if(running&&engine==='web')setTimeout(()=>{try{rec.start()}catch(_){}},200)};
+  rec.onerror=()=>{};rec.start();
+}
+function stopMic(){
+  try{rec&&rec.abort()}catch(_){}rec=null;
+  try{proc&&proc.disconnect();src&&src.disconnect()}catch(_){}proc=null;src=null;an=null;
+  if(voskRec){try{voskRec.remove()}catch(_){}voskRec=null}
+  if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;
+  if(ac){ac.close().catch(()=>{});ac=null}
+  Voice.ready=false;$('mic').style.display='none';
+}
+
+// ---------------- Word lists ----------------
+const COLORS={red:[1,.12,.06],orange:[1,.45,.06],yellow:[1,.85,.12],gold:[1,.7,.18],golden:[1,.7,.18],green:[.2,.9,.25],blue:[.12,.35,1],
+  purple:[.6,.2,.9],violet:[.6,.2,.9],pink:[1,.35,.6],white:[1,.95,.85],silver:[.85,.88,.95],brown:[.6,.3,.1]};
+const WORDS={};const wmap=(l,k)=>l.split(' ').forEach(w=>WORDS[w]=k);
+wmap('rain raining rained raindrop raindrops drizzle puddle puddles','rain');
+wmap('snow snowing snowed snowflake snowflakes','snow');
+wmap('wind windy breeze blew blowing gust','wind');
+wmap('thunder thundered lightning storm stormy','thunder');
+wmap('star stars starry twinkle twinkled twinkling','stars');
+wmap('moon moonlight','moon');
+wmap('sun sunshine sunny sunrise sunlight','sun');
+wmap('fire campfire candle candles fireplace flame flames torch','fire');
+wmap('splash splashed splashing splish','splash');
+wmap('pop popped bubble bubbles','pop');
+wmap('buzz buzzed buzzing bee bees','buzz');
+wmap('knock knocked knocking','knock');
+wmap('bird birds','bird');wmap('fish fishes','fish');wmap('owl owls','owl');
+wmap('firefly fireflies','firefly');wmap('dragon dragons','dragon');
+wmap('love loved hug hugged hugs kiss kissed cuddle cuddled','love');
+wmap('boom bang crash','boom');wmap('whoosh swoosh zoom zoomed','whoosh');
+wmap('big huge giant enormous','big');wmap('tiny teeny','tiny');wmap('rainbow','rainbow');
+wmap('yawn yawned yawning','yawnword');
+const LABEL={rain:'rain',snow:'snow',wind:'wind',thunder:'distant thunder',stars:'stars',moon:'moonlight',sun:'sunshine',fire:'a little fire',splash:'splash',
+  pop:'pop',buzz:'buzz',knock:'knock knock',bird:'a bird',fish:'fish',owl:'an owl',firefly:'fireflies',dragon:'dragon',love:'a hug',boom:'boom',
+  whoosh:'whoosh',rainbow:'rainbow',name:'your name',sunrise:'all safe',glint:'you got it',sparkle:'great answer',laugh:'giggles',wake:'once upon a time'};
+const SCENEWORDS={
+  water:'sea ocean river lake wave waves swim swam swimming beach boat pond water mermaid island sail sailed shore',
+  forest:'forest woods tree trees leaves leaf branch branches jungle moss mushroom mushrooms',
+  night:'night dark moon stars bedtime midnight evening dream dreams owl',
+  meadow:'meadow field fields grass flowers flower garden farm hill hills picnic spring butterfly butterflies',
+  winter:'snow ice icy cold winter frozen frost snowman igloo sled mittens',
+  home:'home house kitchen fireplace cozy bed blanket cottage warm soup bath',
+  day:'sun sunny morning day summer sky bright play played playground'};
+const SW={};for(const k in SCENEWORDS)SCENEWORDS[k].split(' ').forEach(w=>(SW[w]=SW[w]||[]).push(k));
+const TENSE=new Set('scared afraid frightened monster monsters wolf witch growl growled roar roared scream screamed lost alone shadow shadows creep creeping creepy danger trap chase chased ghost ghosts spooky nervous worried trembled shiver shivered howl howled dark'.split(' '));
+const SAD=new Set('sad cried cry crying tears lonely miss missed sorry broken hurt'.split(' '));
+const RELIEF=new Set('safe happy happily laughed smiled smile together found friends rescued saved brave hugged home'.split(' '));
+const LAUGH=new Set('ha haha hahaha hehe hee'.split(' '));
+const GLIMMER=/^(glimmer|glimmers|limmer|climber|glamour|shimmer|swimmer|dimmer|clamor|glimmered)$/;
+
+// ---------------- The Sleep Tide ----------------
+const Tide={phase:'asleep',phaseT:0,from:1,levelT:0,level:0,warm:0,speed:1,storiesDone:0,session:0,yawnMul:1,spots:[],eyes:0,bgK:0};
+const PH={asleep:'Asleep',dozing:'Dozing · waiting for a story',wake:'Waking up',story:'Story',winddown:'Wind-down',goodnight:'Goodnight',night:'Night Watch',done:'Off'};
+const inStory=()=>['wake','story','winddown'].includes(Tide.phase);
+const active=()=>!['asleep','done'].includes(Tide.phase);
+function setPhase(p){Tide.from=Tide.levelT;Tide.phase=p;Tide.phaseT=0;
+  if(p==='goodnight'){Tide.spots=[];for(let k=0;k<7;k++){const a=k*Math.PI*2/7+.3;Tide.spots.push({u:Math.cos(a)*.62,v:Math.sin(a)*.62,fade:0})}Tide.eyes=0;showAccent('goodnight lights')}
+  if(p==='night'){acc=null;queued=null;Think.on=false}
+  if(p==='done')finish();
+}
+function toWake(){if(Tide.phase==='dozing'||Tide.phase==='asleep'){setPhase('wake');trigger('wake',{force:true})}}
+function ensureSession(){if(!active()){Tide.session=performance.now();Tide.storiesDone=0;Tide.warm=0;Tide.yawnMul=1;Tide.levelT=1;Tide.level=.6;setPhase('dozing')}}
+function startEyes(){Tide.eyes=performance.now();Tide.spots.forEach(s=>{if(!s.fade)s.fade=Tide.eyes})}
+function tideTick(dt,now){
+  const T=Tide,q=Q(),quiet=(now-Math.max(Voice.lastActive,lastHeard))/1000;T.phaseT+=dt;
+  switch(T.phase){
+    case 'asleep':T.levelT=.5;break;
+    case 'dozing':T.levelT=1;if(Voice.activeFor>.6)toWake();break;
+    case 'wake':T.levelT=1;if(T.phaseT>4)setPhase('story');break;
+    case 'story':T.levelT=1-.375*clamp(T.phaseT/(900*q),0,1);if(T.phaseT>900*q)setPhase('winddown');else if(quiet>Math.max(40,300*q))setPhase('night');break;
+    case 'winddown':T.levelT=lerp(T.from,.25,sm(0,1,T.phaseT/(300*q)));if(quiet>Math.max(25,60*q))setPhase('night');break;
+    case 'goodnight':T.levelT=lerp(T.from,.125,clamp(T.phaseT/(120*q),0,1));
+      if(T.eyes){if(now-T.eyes>4600)setPhase('night')}
+      else if(T.phaseT>Math.max(30,120*q)||quiet>Math.max(25,60*q)||T.spots.every(s=>s.fade))startEyes();break;
+    case 'night':T.levelT=T.from*(1-sm(0,1,T.phaseT/(600*q)));if(T.phaseT>600*q)setPhase('done');break;
+    case 'done':T.levelT=0;break;
+  }
+  if(active()&&(now-T.session)/1000>3600&&!['night','done'].includes(T.phase))setPhase('night');   // hard cap: 60 minutes
+  const late=['winddown','goodnight','night'].includes(T.phase);
+  T.warm=lerp(T.warm,late?1:0,Math.min(1,dt/(set.quick?5:30)));
+  T.speed=lerp(T.speed,{winddown:.55,goodnight:.45,night:.35}[T.phase]||1,Math.min(1,dt/5));
+  T.level=lerp(T.level,T.levelT*T.yawnMul,Math.min(1,dt/1.2));
+  const bgT={asleep:0,dozing:0,wake:sm(0,4,T.phaseT),story:1,winddown:1,goodnight:.3,night:0,done:0}[T.phase];
+  T.bgK=lerp(T.bgK,bgT,Math.min(1,dt/(T.phase==='wake'?.5:4)));
+  const pct=Math.round(T.level*100);
+  $('phase').textContent=PH[T.phase]+(active()&&T.phase!=='done'?' · '+pct+'%':'');
+}
+
+// ---------------- Mood and setting ----------------
+const Mood={scene:'calm',prev:'calm',mix:1,since:0,scores:{},sad:0,tense:0,tenseT:0,last:0};
+function moodDecay(now){const dt=(now-(Mood.last||now))/1000;Mood.last=now;const k=Math.exp(-dt/60);for(const s in Mood.scores)Mood.scores[s]*=k;Mood.sad*=k}
+function moodWords(ws,now){moodDecay(now);let relief=0;
+  for(const w of ws){(SW[w]||[]).forEach(s=>Mood.scores[s]=(Mood.scores[s]||0)+1);if(TENSE.has(w))Mood.tenseT=Math.min(1,Mood.tenseT+.34);if(SAD.has(w))Mood.sad+=1;if(RELIEF.has(w))relief++}
+  if(relief&&Mood.tenseT>.15){if(Mood.tenseT>.4)trigger('sunrise',{force:true});Mood.tenseT*=.3}
+  let best='calm',bs=1.5;for(const s in Mood.scores)if(Mood.scores[s]>bs){bs=Mood.scores[s];best=s}
+  if(Mood.sad>bs&&Mood.sad>1.5)best='sad';
+  const cur=Mood.scene==='sad'?Mood.sad:(Mood.scores[Mood.scene]||0);
+  if(best!==Mood.scene&&bs>cur*1.3&&now-Mood.since>12000){Mood.prev=Mood.scene;Mood.scene=best;Mood.mix=0;Mood.since=now;showAccent('scene: '+best)}
+}
+const SCENE_COL={calm:[[1,.55,.3],[.95,.36,.48]],meadow:[[1,.72,.28],[.5,.8,.25]],day:[[1,.82,.5],[1,.62,.3]],night:[[.32,.1,.42],[.12,.1,.42]],
+  water:[[.06,.42,.55],[.45,.85,.88]],forest:[[.16,.45,.16],[1,.75,.3]],winter:[[.7,.82,1],[.95,.9,.98]],home:[[1,.42,.1],[1,.62,.25]],sad:[[.45,.3,.75],[.3,.25,.6]]};
+function scene(name,i,u,v,r,t,o){
+  const c=SCENE_COL[name],A=c[0],B=c[1];let k=0,s=.35;
+  switch(name){
+    case 'calm':k=noise(u*1.2+3,v*1.2,t*.05);s=.34+.2*noise(u*.7+9,v*.7,t*.035);break;
+    case 'meadow':k=sm(.35,.75,noise(u*1.6,v*1.6+2,t*.05));s=.36+.18*noise(u*.8+4,v*.8,t*.04);break;
+    case 'day':k=noise(u*.9,v*.9,t*.04);s=.42+.08*Math.sin(t*.25+r*2);break;
+    case 'night':k=noise(u*1.1,v*1.1+7,t*.03);s=.3;break;
+    case 'water':{const w=(Math.sin(u*5.5+t*.7)+Math.sin(v*4.7-t*.55)+Math.sin((u+v)*3.9+t*.45))/3;k=sm(.2,.9,w*.5+.5)*.8;s=.42;break}
+    case 'forest':k=sm(.55,.8,noise(u*2.2,v*2.2,t*.06));s=.38;break;
+    case 'winter':k=noise(u*1.3,v*1.3+11,t*.04);s=.34;break;
+    case 'home':k=noise(u*1.4,v*1.4,t*.12);s=(.36+.1*(1-r))*(.85+.15*noise(t*.6,1,2));break;
+    case 'sad':k=noise(u,v+3,t*.025);s=.28;break;
+  }
+  o[0]=(A[0]+(B[0]-A[0])*k)*s;o[1]=(A[1]+(B[1]-A[1])*k)*s;o[2]=(A[2]+(B[2]-A[2])*k)*s;
+  if(name==='night'){const h=hash(i*3.1+.5);if(h>.86){const tw=.22*(.65+.35*Math.sin(t*1.1+h*40));o[0]+=tw;o[1]+=tw*.95;o[2]+=tw*.85}}
+}
+
+// ---------------- Accents (one at a time, a few seconds each) ----------------
+let acc=null,queued=null,lastAccentAt=0,ripples=[],stars=[],sizeMul={v:1,until:0};
+const cool={};
+const Think={on:false,since:0};
+let yawnFx=0;
+const DUR={bloom:3.2,rainbow:4,rain:4,snow:4.5,wind:3,thunder:2.4,moon:4,sun:3.5,fire:4,splash:2,pop:1.4,buzz:3.5,knock:1.5,bird:3,fish:4,owl:4.2,
+  firefly:4.5,dragon:3.5,love:3.5,name:3,boom:1.8,whoosh:1.8,sunrise:6,wake:4,sparkle:1.8,glint:2.4,laugh:3};
+function trigger(kind,o={}){
+  if(!active()||Tide.phase==='night'||Tide.phase==='done')return;
+  const now=performance.now(),key=o.key||kind;
+  if(!o.force&&cool[key]&&now-cool[key]<(o.cool||20000))return;cool[key]=now;
+  if(kind==='stars'){for(let k=0;k<6;k++)stars.push({i:Math.floor(hash(now*.001+k*7.7)*N),born:now});showAccent(LABEL.stars);if(stars.length>30)stars.splice(0,stars.length-30);return}
+  if(kind==='big'||kind==='tiny'){sizeMul={v:kind==='big'?1.7:.5,until:now+3000};return}
+  const a={kind,born:now,dur:(DUR[kind]||3)*1000,col:o.col,seed:hash(now*.0137)};
+  if(acc&&now-acc.born<1500&&!o.force){queued=a;return}
+  acc=a;lastAccentAt=now;showAccent(o.label||LABEL[kind]||kind);
+  if(kind==='moon')trigger('stars',{force:true});
+}
+function accentAdd(i,u,v,r,now,o){
+  const a=acc;if(!a)return;const age=(now-a.born)/1000,p=age/(a.dur/1000);
+  if(p>=1){acc=null;if(queued&&now-queued.born<3000){queued.born=now;acc=queued;showAccent(LABEL[queued.kind]||queued.kind)}queued=null;return}
+  const env=sm(0,.15,p)*(1-sm(.7,1,p)),sd=a.seed;let k=0,c=[1,.75,.4];
+  switch(a.kind){
+    case 'bloom':{const rad=.2+.7*sm(0,.45,p);k=.95*Math.exp(-(r*r)/(rad*rad)*1.5);c=a.col;break}
+    case 'rainbow':{c=hsv(r*1.2-age*.25,.85,1);k=.65*(1-r*.3);break}
+    case 'rain':{c=[.55,.7,1];for(let d=0;d<10;d++){const x=hash(sd+d)*2-1,y=((hash(sd+d+50)*2.4+age*1.5)%2.4)-1.2,du=(u-x)/.07,dv=v-y;
+      k+=Math.exp(-du*du)*(dv<0?Math.exp(-(dv*dv)/.06):Math.exp(-(dv*dv)/.004))*.7}break}
+    case 'snow':{c=[1,.97,.92];for(let d=0;d<14;d++){const x=hash(sd+d)*2-1+.12*Math.sin(age*1.3+d),y=((hash(sd+d+50)*2.4+age*.32)%2.4)-1.2;k+=.65*g2(u-x,v-y,.09)}break}
+    case 'wind':{const x0=-1.6+age*1.2;k=.5*Math.exp(-Math.pow((u-x0-v*.3)/.28,2));c=[.85,.8,.7];break}
+    case 'thunder':{k=.7*Math.pow(Math.sin(Math.PI*p),2)*Math.exp(-(u+1)*1.3);c=[.6,.48,.9];break}
+    case 'moon':{k=.75*g2(u-.45,v+.45,.32);c=[.95,.9,.75];break}
+    case 'sun':case 'sunrise':{const rad=.15+(a.kind==='sun'?.8:1.3)*sm(0,.6,p);k=.85*Math.exp(-(r*r)/(rad*rad));c=[1,.74,.32];break}
+    case 'fire':{const fx=(sd-.5)*.6,fy=(hash(sd+3)-.5)*.6;k=.85*g2(u-fx,v-fy,.28)*(.65+.35*noise(age*2.5,i*.01,3));c=[1,.4,.08];break}
+    case 'splash':{const d=r-p*1.1;k=.75*Math.exp(-(d*d)/.008)*(1-p);c=[.6,.85,1];break}
+    case 'pop':{const x=(sd-.5)*1.2,y=(hash(sd+1)-.5)*1.2,s=.05+.18*p;k=.9*g2(u-x,v-y,s)*(1-sm(.6,1,p))/(1-sm(.7,1,p)+.001);c=[1,.8,.9];break}
+    case 'buzz':{const x=.55*Math.sin(age*2.1+sd*6),y=.55*Math.sin(age*1.3+1);k=.9*g2(u-x,v-y,.1);c=[1,.85,.2];break}
+    case 'knock':{const t1=Math.max(0,1-Math.abs(age-.3)/.18),t2=Math.max(0,1-Math.abs(age-.85)/.18);k=.85*(t1+t2)*g2(u-.55,v,.25);c=[1,.75,.5];break}
+    case 'bird':{for(let j=0;j<5;j++){const pp=p-j*.03,x=-1.25+2.5*pp,y=-.55*Math.sin(Math.PI*pp)+.25;k+=(j?.25:.9)*g2(u-x,v-y,.09)}c=[.9,.95,1];break}
+    case 'fish':{c=[.3,.8,.9];for(let j=0;j<3;j++){const an_=age*.9+j*.55,x=Math.cos(an_)*.82,y=Math.sin(an_)*.82;k+=.8*g2(u-x,v-y,.1)}break}
+    case 'owl':{const open=1-(sm(1.5,1.65,age)-sm(1.75,1.9,age))-(sm(3.0,3.15,age)-sm(3.25,3.4,age));k=.95*open*(g2(u-.56,v+.62,.07)+g2(u-.74,v+.62,.07));c=[1,.7,.15];break}
+    case 'firefly':{c=[.75,1,.3];for(let j=0;j<6;j++){const x=Math.sin(age*.5+j*2.1+sd*9)*.7,y=Math.cos(age*.4+j*1.7)*.7,bl=Math.max(0,Math.sin(age*3.9/1.6+j*1.3));k+=.85*bl*g2(u-x,v-y,.08)}break}
+    case 'dragon':{c=[1,.35,.05];for(let j=0;j<8;j++){const pp=p-j*.035,x=-1.25+2.5*pp,y=.3*Math.sin(pp*6);k+=(1-j/8)*.8*g2(u-x,v-y,.1)}break}
+    case 'love':case 'name':case 'wake':{const rr=1.05-p*1.05,d=r-rr;k=.7*Math.exp(-(d*d)/.012)+(a.kind==='wake'?.35:.25)*sm(.6,1,p)*Math.exp(-r*r/.12);c=a.kind==='love'?[1,.4,.55]:[1,.76,.32];break}
+    case 'boom':{k=.6*Math.pow(Math.sin(Math.PI*p),2)*Math.exp(-r*r/.35);c=[1,.55,.25];break}
+    case 'whoosh':{const x0=-1.6+p*3.2;k=.55*Math.exp(-Math.pow((u-x0)/.25,2));c=[.9,.85,.75];break}
+    case 'sparkle':{for(let j=0;j<12;j++){const x=(hash(sd+j)-.5)*1.1,y=(hash(sd+j+20)-.5)*1.1,t0=hash(sd+j+40)*.6,e=Math.max(0,1-Math.abs(age-t0-.35)/.35);k+=.9*e*g2(u-x,v-y,.07)}c=[1,.9,.6];break}
+    case 'glint':{k=.9*g2(u,v+p*.8,.08)*(1-p);c=[1,.8,.3];break}
+    case 'laugh':{for(let j=0;j<8;j++){const an_=hash(sd+j)*6.283,d=p*(.4+hash(sd+j+9)*.6);k+=.6*g2(u-Math.cos(an_)*d,v-Math.sin(an_)*d,.07+.05*p)}c=[1,.85,.7];break}
+  }
+  k*=env;o[0]+=c[0]*k;o[1]+=c[1]*k;o[2]+=c[2]*k;
+}
+function onOnset(){const now=performance.now();if(!active())return;
+  if(ripples.length&&now-ripples[ripples.length-1].born<500)return;   // at most 2 ripples a second
+  ripples.push({born:now,speed:.35+.6*Voice.loud,life:Voice.onsets.length<3?2.4:1.6});if(ripples.length>6)ripples.shift()}
+function doYawn(label){const now=performance.now();yawnFx=now;showAccent('Glimmer yawns');
+  if(Tide.phase==='story')setPhase('winddown');else if(Tide.phase==='winddown')Tide.yawnMul=Math.max(.6,Tide.yawnMul*.85)}
+
+// ---------------- What was heard ----------------
+let lastHeard=0;
+function heardWord(w){
+  w=w.toLowerCase().replace(/[^a-z']/g,'');if(!w)return;lastHeard=performance.now();
+  if(!active())return;
+  if(Tide.phase==='dozing')toWake();
+  if(!inStory())return;   // during the goodnight ritual, words only put lights to bed
+  if(set.name&&w===set.name){trigger('name');return}
+  if(COLORS[w]){trigger('bloom',{col:COLORS[w],key:'c:'+w,cool:12000,label:w});return}
+  if(LAUGH.has(w)){trigger('laugh',{cool:8000});return}
+  const k=WORDS[w];if(!k)return;
+  if(k==='yawnword'){if(inStory()&&performance.now()-lastYawn>30000){lastYawn=performance.now();doYawn()}return}
+  trigger(k);
+}
+function heardSentence(t){
+  const now=performance.now(),s=norm(t),ws=s.trim().split(' ');lastHeard=now;
+  if(!active())return;
+  moodWords(ws,now);
+  if(s.includes(' once upon a time ')){if(Tide.phase==='dozing')toWake();else if(inStory()){trigger('wake',{force:true});if(Tide.phase==='story'&&Tide.storiesDone>=set.stories-1)setPhase('winddown')}}
+  if(/ the end $/.test(s)&&inStory()){Tide.storiesDone++;trigger('sunrise',{force:true});
+    if(Tide.storiesDone>=set.stories)setTimeout(()=>{if(inStory())setPhase('goodnight')},2500);else if(Tide.phase==='story'&&Tide.storiesDone>=set.stories-1)setPhase('winddown')}
+  // goodnights: each one puts a light to bed; "goodnight Glimmer" closes Glimmer's eyes
+  const gn=ws.reduce((n,w)=>n+(w==='goodnight'?1:0),0);
+  if(gn&&(Tide.phase==='winddown'||(Tide.phase==='story'&&Tide.storiesDone>=set.stories-1)))setPhase('goodnight');
+  if(gn&&Tide.phase==='goodnight'&&!Tide.eyes){
+    for(let j=0;j<ws.length;j++)if(ws[j]==='goodnight'){
+      if(GLIMMER.test(ws[j+1]||'')){startEyes();showAccent('goodnight, Glimmer');break}
+      const sp=Tide.spots.find(x=>!x.fade);if(sp){sp.fade=now+j*600;showAccent('goodnight '+(ws[j+1]||''))}}}
+  // questions to the child
+  const qs=/^ (what|why|how|where|who|which|can you|do you|did you|would you|will you|are you|is it|should) /.test(s);
+  if(inStory()&&ws.length>=3&&(qs||now-Voice.risingAt<2500)){Think.on=true;Think.since=now;showAccent('thinking…')}
+}
+
+// ---------------- Render ----------------
+const frame=new Uint8Array(N*3),prevOut=new Float32Array(N*3),img=$('c').getContext('2d').createImageData(W,H),ctx=$('c').getContext('2d');
+let sceneT=0,lastT=performance.now(),cx=0,glowR=.2;
+const o=[0,0,0],o2=[0,0,0];
+function soft(x){return x<.8?x:.8+.2*(1-Math.exp(-(x-.8)/.2))}
+function renderTick(now,dt){
+  const T=Tide,sp=T.speed;sceneT+=dt*sp;
+  if(Mood.mix<1)Mood.mix=Math.min(1,Mood.mix+dt/(6/sp));
+  Mood.tense=lerp(Mood.tense,Mood.tenseT,Math.min(1,dt/2.5));Mood.tenseT*=Math.exp(-dt/40);
+  const V=Voice,showVoice=['wake','story','winddown','goodnight'].includes(T.phase);
+  cx=lerp(cx,V.side*.38,Math.min(1,dt/.8));
+  const sMul=now<sizeMul.until?sizeMul.v:1;
+  const targetR=(V.whisper?.1:.2+.3*V.loud)*sMul*(T.phase==='goodnight'?.7:1);glowR=lerp(glowR,targetR,Math.min(1,dt/.25));
+  const pres=showVoice?V.presence:0,idleBreath=.5+.5*Math.sin(now/1000*2*Math.PI/5);
+  const pr=(V.pitch&&V.pitchRef)?clamp(Math.log2(V.pitch/V.pitchRef)*1.6,-1,1):0;
+  const gcol=V.whisper?[1,.7,.35]:pr<0?[1,lerp(.68,.38,-pr),lerp(.3,.06,-pr)]:[1,lerp(.68,.86,pr),lerp(.3,.6,pr)];
+  const gI=V.whisper?.85:.45+.35*V.loud;
+  const pace=V.onsets.length/2,shimmer=showVoice?pres*clamp((pace-3)/3+Math.max(0,pr-.4),0,1)*.35:0;
+  ripples=ripples.filter(rp=>(now-rp.born)/1000<rp.life);
+  stars=stars.filter(s=>now-s.born<45000);
+  const yawnP=yawnFx?(now-yawnFx)/3000:2,yawnK=yawnP<1?1-.45*Math.sin(Math.PI*yawnP):1,yawnS=yawnP<1?1+.5*Math.sin(Math.PI*yawnP):1;
+  const tau=Mood.tense,w=T.warm,peak=T.level*set.bright/100*255,maxStep=255*dt/.3;
+  const thinkA=Think.on?Math.min(1,(now-Think.since)/800):0;if(Think.on&&now-Think.since>15000)Think.on=false;
+  const ember=T.phase==='dozing'||T.phase==='asleep'?(.25+.2*idleBreath):T.phase==='night'?(.55+.35*Math.sin(now/1000*2*Math.PI/10)):0;
+  for(let i=0;i<N;i++){
+    const u=U[i],v=V_[i],r=R[i];
+    // 1. background scene (with crossfade)
+    if(T.bgK>.001){scene(Mood.scene,i,u,v,r,sceneT,o);if(Mood.mix<1){scene(Mood.prev,i,u,v,r,sceneT,o2);const m=sq(Mood.mix);o[0]=lerp(o2[0],o[0],m);o[1]=lerp(o2[1],o[1],m);o[2]=lerp(o2[2],o[2],m)}
+      o[0]*=T.bgK;o[1]*=T.bgK;o[2]*=T.bgK}else{o[0]=o[1]=o[2]=0}
+    // 2. brave light: the far edges dim, a warm steady pool gathers around the child
+    if(tau>.01){const d=1-.6*tau*sm(.25,.95,r),pool=.55*tau*Math.exp(-r*r/.14);o[0]=o[0]*d+pool;o[1]=o[1]*d+pool*.55;o[2]=o[2]*d+pool*.2}
+    // persistent stars
+    for(const s of stars)if(s.i===i){const a=Math.min(1,(now-s.born)/1500)*(1-sm(35000,45000,now-s.born))*(.7+.3*Math.sin(now/700+i));o[0]+=.5*a;o[1]+=.47*a;o[2]+=.4*a}
+    // 3. the voice glow, ripples and shimmer
+    const du=u-cx,d=Math.hypot(du,v)/Math.SQRT2;
+    if(showVoice){const gk=(pres*gI+(1-pres)*.18*idleBreath)*Math.exp(-(d*d)/(glowR*glowR*yawnS*yawnS));o[0]+=gcol[0]*gk;o[1]+=gcol[1]*gk;o[2]+=gcol[2]*gk;
+      for(const rp of ripples){const age=(now-rp.born)/1000,rr=age*rp.speed*sp,dd=d-rr,a=.3*(1-age/rp.life)*Math.exp(-(dd*dd)/.005);o[0]+=gcol[0]*a;o[1]+=gcol[1]*a;o[2]+=gcol[2]*a}
+      if(shimmer>0){const s=shimmer*sm(.72,.95,noise(u*4,v*4,now/1000*1.6))*Math.exp(-d*d/.4);o[0]+=s;o[1]+=s*.9;o[2]+=s*.7}}
+    // 4. the current accent
+    accentAdd(i,u,v,r,now,o);
+    // 5. thinking swirl
+    if(thinkA>0){const ang=(now-Think.since)/1000*2.1*sp;for(let j=0;j<6;j++){const a=ang-j*.28,k=thinkA*(j?.4*(1-j/6):.8)*g2(u-Math.cos(a)*.45,v-Math.sin(a)*.45,.11);o[0]+=k;o[1]+=k*.8;o[2]+=k*.45}}
+    // 6. goodnight lights and Glimmer's sleepy eyes
+    if(T.phase==='goodnight'){for(const s of T.spots){const a=s.fade?1-clamp((now-s.fade)/3000,0,1):1;if(a>0){const k=.5*a*g2(u-s.u,v-s.v,.16);o[0]+=k;o[1]+=k*.58;o[2]+=k*.22}}
+      if(T.eyes){const e=(now-T.eyes)/1000,open=sm(0,1,e)*(1-(sm(1.6,1.8,e)-sm(1.9,2.1,e)))*(1-sm(3.2,4.2,e)),k=.75*open*(g2(u-.13,v+.05,.07)+g2(u+.13,v+.05,.07));o[0]+=k;o[1]+=k*.65;o[2]+=k*.3}}
+    // dozing / night-watch ember
+    if(ember>0){const k=ember*Math.exp(-r*r/.035);o[0]+=k;o[1]+=k*.38;o[2]+=k*.1}
+    // Glimmer's yawn
+    o[0]*=yawnK;o[1]*=yawnK;o[2]*=yawnK;
+    // warmify late in the night: no blue, no white
+    if(w>.01){o[1]*=1-.5*w;o[2]*=1-.82*w}
+    // ceiling + slew limit (nothing changes faster than full-scale in 0.3 s, so nothing can flash)
+    for(let c=0;c<3;c++){const t=soft(Math.max(0,o[c]))*peak,j=i*3+c,pv=prevOut[j],nv=pv+clamp(t-pv,-maxStep,maxStep);prevOut[j]=nv;frame[j]=nv<0?0:nv>255?255:nv}
+  }
+  for(let i=0;i<N;i++){img.data[i*4]=frame[i*3];img.data[i*4+1]=frame[i*3+1];img.data[i*4+2]=frame[i*3+2];img.data[i*4+3]=255}
+  ctx.putImageData(img,0,0);
+}
+const V_=V;   // alias (V is used for the Voice object inside functions)
+
+// ---------------- Real blanket (same relay + pairing code as Lully) ----------------
+const Blanket=(function(){
+  const btn=$('blanket');let client=null,code='',topic='',lastSend=0,ok=false;
+  try{code=localStorage.getItem('lullyBlanket')||''}catch(e){}
+  function label(t){btn.textContent=t}
+  function loadLib(){return new Promise((res,rej)=>{if(window.mqtt)return res();const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s)})}
+  async function connect(){
+    if(!code)return;label('Blanket: connecting…');
+    try{await loadLib()}catch(e){label('Blanket: could not load');return}
+    if(client)try{client.end(true)}catch(e){}
+    topic='lully/'+code+'/frame';
+    client=mqtt.connect('wss://broker.emqx.io:8084/mqtt',{clientId:'glimmer-'+Math.random().toString(16).slice(2,10),reconnectPeriod:2000,connectTimeout:8000});
+    client.on('connect',()=>{ok=true;label('Blanket: '+code+' ✓');try{client.publish(topic,new Uint8Array([115,112,1]))}catch(e){}});
+    client.on('close',()=>{ok=false;label('Blanket: reconnecting…')});
+    client.on('error',()=>{ok=false;label('Blanket: relay error')});
+  }
+  btn.addEventListener('click',()=>{
+    if(ok){const c=confirm('Blanket connected ('+code+').\nOK = run the layout test\nCancel = disconnect');
+      if(c){client.publish(topic,'test')}else{try{client.end(true)}catch(e){}client=null;ok=false;code='';try{localStorage.removeItem('lullyBlanket')}catch(e){}label('Blanket: not connected')}return}
+    const c=prompt('Pairing code from the ESP32 setup page:',code||'lully-');if(!c)return;code=c.trim();try{localStorage.setItem('lullyBlanket',code)}catch(e){}connect();
+  });
+  if(code)connect();
+  function send(buf,now,every){if(!ok||now-lastSend<(every||100))return;lastSend=now;try{client.publish(topic,buf,{qos:0})}catch(e){}}
+  return{send,on:()=>ok};
+})();
+
+// ---------------- Main loop ----------------
+let lastTick=0;
+function loop(now){
+  requestAnimationFrame(loop);
+  if(now-lastTick<30)return;const dt=Math.min(.1,(now-(lastTick||now))/1000);lastTick=now;
+  voiceTick(dt,now);tideTick(dt,now);renderTick(now,dt);
+  if(active())Blanket.send(frame,now,Tide.phase==='done'?2000:100);
+}
+requestAnimationFrame(loop);
+
+// ---------------- Controls ----------------
+function uiRunning(on){const b=$('go');b.textContent=on?'Stop':'Start story time';b.classList.toggle('stop',on)}
+function finish(){running=false;stopMic();uiRunning(false);status('Goodnight. Story time is over. Tap Start for another night.');
+  if(wakeLock){wakeLock.release().catch(()=>{});wakeLock=null}}
+function stopAll(){running=false;stopMic();uiRunning(false);Think.on=false;acc=null;queued=null;
+  Tide.phase='done';Tide.levelT=0;status('Stopped.');if(wakeLock){wakeLock.release().catch(()=>{});wakeLock=null}}
+$('go').addEventListener('click',async()=>{
+  if(running){stopAll();return}
+  say('');running=true;uiRunning(true);heardFinal='';heardPartial='';renderHeard();
+  Tide.phase='asleep';ensureSession();Mood.scene='calm';Mood.prev='calm';Mood.scores={};Mood.tenseT=0;Mood.sad=0;
+  try{if('wakeLock' in navigator)navigator.wakeLock.request('screen').then(w=>wakeLock=w).catch(()=>{})}catch(_){}
+  try{await startMic()}catch(err){
+    running=false;stopMic();uiRunning(false);Tide.phase='asleep';
+    const blocked=err&&(err.name==='NotAllowedError'||err.name==='SecurityError');
+    say(blocked?'Microphone access was blocked. Allow the microphone for this site in your browser settings (on iPhone Chrome: Settings → Chrome → Microphone), then tap Start again.':'Couldn’t start: '+(err&&err.message||err));
+  }
+});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&running&&'wakeLock' in navigator&&!wakeLock)navigator.wakeLock.request('screen').then(w=>wakeLock=w).catch(()=>{})});
+
+// ---------------- Try it without reading ----------------
+function fakeVoice(sec,o={}){sim={until:performance.now()+sec*1000,loud:o.loud??.5,whisper:!!o.whisper,pitch:o.pitch||0};Voice.lastActive=performance.now()}
+function feed(t){ensureSession();if(Tide.phase==='dozing')toWake();fakeVoice(Math.min(4,.25*t.split(' ').length+.6));
+  const ws=t.toLowerCase().replace(/[^a-z' ]+/g,' ').trim().split(/\s+/);let j=0;
+  const step=()=>{if(j<ws.length){partialWords(ws.slice(0,++j));setTimeout(step,170)}else finalText(ws.join(' '))};step()}
+const TRY=[
+  ['Once upon a time',()=>feed('once upon a time')],
+  ['Normal voice',()=>{ensureSession();toWake();fakeVoice(4)}],
+  ['Whisper',()=>{ensureSession();toWake();fakeVoice(4,{whisper:true,loud:.1})}],
+  ['Big voice',()=>{ensureSession();toWake();fakeVoice(3,{loud:1})}],
+  ['Troll voice',()=>{ensureSession();toWake();fakeVoice(3,{pitch:Voice.pitchRef*.6})}],
+  ['Mouse voice',()=>{ensureSession();toWake();fakeVoice(3,{pitch:Voice.pitchRef*1.8})}],
+  ['red balloon',()=>feed('she held a red balloon')],
+  ['rain',()=>feed('it began to rain')],
+  ['snow',()=>feed('soft snow was falling')],
+  ['thunder',()=>feed('far away the thunder rumbled')],
+  ['the moon',()=>feed('the moon came out')],
+  ['an owl',()=>feed('an owl watched from the tree')],
+  ['fireflies',()=>feed('the fireflies came out')],
+  ['a dragon',()=>feed('a friendly dragon flew by')],
+  ['a hug',()=>feed('she hugged him tight')],
+  ['by the sea',()=>feed('they sailed across the ocean waves to the beach by the sea')],
+  ['scary part',()=>feed('the wolf growled in the dark and she was scared and alone')],
+  ['safe again',()=>feed('then they were safe at home together')],
+  ['a question',()=>{feed('what do you think will happen next');setTimeout(()=>fakeVoice(1.2,{pitch:Voice.pitchRef*1.4}),3200)}],
+  ['giggles',()=>feed('ha ha ha')],
+  ['a yawn',()=>{ensureSession();if(Tide.phase==='dozing')toWake();doYawn()}],
+  ['the end',()=>feed('the end')],
+  ['goodnight moon',()=>feed('goodnight moon goodnight stars')],
+  ['goodnight Glimmer',()=>feed('goodnight glimmer')],
+];
+TRY.forEach(([t,f])=>{const b=document.createElement('button');b.textContent=t;b.onclick=f;$('tryBtns').append(b)});
+$('typed').addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.value.trim()){feed(e.target.value.trim());e.target.value=''}});
+</script>
+</body></html>
