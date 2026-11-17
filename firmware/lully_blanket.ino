@@ -22,20 +22,24 @@
 
 // ---------- your layout ----------
 #define DATA_PIN     13        // strip data wire -> GPIO 13 (through a 330 ohm resistor if you have one)
-#define STRIPS       1         // how many 160-LED strips are chained: 1 = 16x10 test, 2 = full 16x20
-#define COLS         16        // LEDs per folded row
-#define ROWS         (STRIPS * 10)  // 10 rows of 16 per strip
+#define STRIPS       1         // how many 160-LED strips are chained (160 LEDs each)
+#define ROWS         10        // rows on your board (one strip: 10, two strips: 20)
+#define COLS         14        // LEDs you can SEE in each row
+#define TURN_LEDS    2         // LEDs hidden inside each Z-fold corner (kept off). Cut-and-soldered rows: 0
+// check: ROWS*COLS + (ROWS-1)*TURN_LEDS must be <= STRIPS*160   (10*14 + 9*2 = 158  OK)
 #define SERPENTINE   true      // rows alternate direction (zigzag fold)
 #define MAX_MILLIAMPS (STRIPS * 1000)  // power limit for the whole setup (one strip: 1 A)
 #define MAX_BRIGHT   140       // 0-255 overall ceiling; it's under fabric, this is plenty
 // ----------------------------------
 
-#define NUM_LEDS (COLS * ROWS)
+#define NUM_LEDS (STRIPS * 160)
+#define GRID (COLS * ROWS)
+static_assert(ROWS * COLS + (ROWS - 1) * TURN_LEDS <= NUM_LEDS, "Layout uses more LEDs than the strip has");
 #define FRAME_COLS 16          // the app always sends a 16 x 20 picture
 #define FRAME_ROWS 20
 #define FRAME_BYTES (FRAME_COLS * FRAME_ROWS * 3)
 CRGB leds[NUM_LEDS];
-float cur[NUM_LEDS * 3], tgt[NUM_LEDS * 3];
+float cur[GRID * 3], tgt[GRID * 3];      // one entry per visible LED, in grid order
 
 const char* BROKER = "broker.emqx.io";   // free public MQTT relay (the app connects to the same one)
 const int   PORT   = 1883;
@@ -49,9 +53,9 @@ uint32_t lastFrameMs = 0, testUntil = 0;
 uint8_t bright = MAX_BRIGHT;
 uint8_t gammaT[256];               // LEDs look too bright at low levels without this
 
-int ledIndex(int x, int y) {               // grid (x,y) -> position along the strip
+int ledIndex(int x, int y) {               // grid (x,y) -> position along the strip, skipping corner LEDs
   if (SERPENTINE && (y & 1)) x = COLS - 1 - x;
-  return y * COLS + x;
+  return y * (COLS + TURN_LEDS) + x;
 }
 
 void onMessage(char* t, byte* p, unsigned int len) {
@@ -59,9 +63,10 @@ void onMessage(char* t, byte* p, unsigned int len) {
     for (int y = 0; y < ROWS; y++) {
       int r0 = y * FRAME_ROWS / ROWS, r1 = (y + 1) * FRAME_ROWS / ROWS; if (r1 <= r0) r1 = r0 + 1;
       for (int x = 0; x < COLS; x++) {
+        int c0 = x * FRAME_COLS / COLS, c1 = (x + 1) * FRAME_COLS / COLS; if (c1 <= c0) c1 = c0 + 1;
         float a = 0, b = 0, c = 0; int n = 0;
-        for (int r = r0; r < r1; r++) { int src = (r * FRAME_COLS + x) * 3; a += p[src]; b += p[src + 1]; c += p[src + 2]; n++; }
-        int dst = ledIndex(x, y) * 3;
+        for (int r = r0; r < r1; r++) for (int q = c0; q < c1; q++) { int src = (r * FRAME_COLS + q) * 3; a += p[src]; b += p[src + 1]; c += p[src + 2]; n++; }
+        int dst = (y * COLS + x) * 3;
         tgt[dst] = a / n; tgt[dst + 1] = b / n; tgt[dst + 2] = c / n;
       }
     }
@@ -111,7 +116,7 @@ void setup() {
   mqtt.setBufferSize(FRAME_BYTES + 128);
   mqtt.setCallback(onMessage);
   mqtt.setKeepAlive(30);
-  for (int i = 0; i < NUM_LEDS * 3; i++) { cur[i] = 0; tgt[i] = 0; }
+  for (int i = 0; i < GRID * 3; i++) { cur[i] = 0; tgt[i] = 0; }
 }
 
 void loop() {
@@ -134,10 +139,14 @@ void loop() {
   // no frames for 20 s (phone closed): fade down to a faint warm glow
   bool stale = now - lastFrameMs > 20000;
   float k = stale ? 0.01f : 0.12f;        // glide toward the newest frame
-  for (int i = 0; i < NUM_LEDS * 3; i++) {
+  for (int i = 0; i < GRID * 3; i++) {
     float target = stale ? ((i % 3 == 0) ? 18 : (i % 3 == 1) ? 8 : 3) : tgt[i];
     cur[i] += (target - cur[i]) * k;
   }
-  for (int i = 0; i < NUM_LEDS; i++) leds[i] = CRGB(gammaT[(uint8_t)cur[i * 3]], gammaT[(uint8_t)cur[i * 3 + 1]], gammaT[(uint8_t)cur[i * 3 + 2]]);
+  fill_solid(leds, NUM_LEDS, CRGB::Black);   // corner and spare LEDs stay off
+  for (int y = 0; y < ROWS; y++) for (int x = 0; x < COLS; x++) {
+    int g = (y * COLS + x) * 3;
+    leds[ledIndex(x, y)] = CRGB(gammaT[(uint8_t)cur[g]], gammaT[(uint8_t)cur[g + 1]], gammaT[(uint8_t)cur[g + 2]]);
+  }
   FastLED.show();
 }
