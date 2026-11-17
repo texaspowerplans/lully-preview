@@ -41,7 +41,7 @@ body.full .top,body.full .bottom{display:none}
 </head>
 <body>
 <div class="top">
-  <div><small>Lully blanket preview v28 · 4 × 5 ft · 320 LEDs</small><div id="scene">Ready</div><div id="layers"></div></div>
+  <div><small>Lully blanket preview v29 · 4 × 5 ft · 320 LEDs</small><div id="scene">Ready</div><div id="layers"></div></div>
   <div id="hit"></div>
 </div>
 <div id="stage"><canvas id="cv"></canvas><div id="fullhint"></div></div>
@@ -68,6 +68,7 @@ body.full .top,body.full .bottom{display:none}
     <button id="cloud" class="ghost chip">Cloud AI: off</button>
     <button id="style" class="ghost chip">Style: soft glow</button>
     <button id="blanket" class="ghost chip">Blanket: not connected</button>
+    <button id="spacing" class="ghost chip">LED spacing: every LED</button>
   </div>
   <div class="row"><form id="typed"><input id="line" placeholder="Or type a line" autocomplete="off"><button class="ghost">Go</button></form></div>
 </div>
@@ -720,6 +721,15 @@ const Blanket=(function(){
     for(let k=0;k<N*3;k++){let v=buf[k];v=v<=0?0:v<200?v:200+55*(1-Math.exp(-(v-200)/55));out[k]=v}
     try{client.publish(topic,out,{qos:0})}catch(e){}
   }
+  // spacing preview: the test strip has 160 LEDs per meter (one every ~1/4 inch); light only every Nth one
+  const SP=[{n:1,l:'every LED'},{n:4,l:'1 inch'},{n:8,l:'2 inches'},{n:12,l:'3 inches'},{n:16,l:'4 inches'}];let spI=0;
+  try{spI=+localStorage.getItem('lullySpacing')||0}catch(e){}
+  const spBtn=document.getElementById('spacing');const spLabel=()=>spBtn.textContent='LED spacing: '+SP[spI].l;spLabel();
+  spBtn.addEventListener('click',()=>{
+    if(!ok){showHit('Connect the blanket first');return}
+    spI=(spI+1)%SP.length;try{localStorage.setItem('lullySpacing',spI)}catch(e){}spLabel();
+    client.publish(topic,new Uint8Array([115,112,SP[spI].n]));showHit('Spacing: '+SP[spI].l);
+  });
   return{send,on:()=>ok};
 })();
 // ---- Cloud AI painter (optional): each finished sentence's TEXT (never audio) goes to a private relay.

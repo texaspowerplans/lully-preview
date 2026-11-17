@@ -51,6 +51,7 @@ char code[33] = "";
 char topic[64];
 uint32_t lastFrameMs = 0, testUntil = 0;
 uint8_t bright = MAX_BRIGHT;
+uint8_t spacing = 1;                 // light only every Nth LED along the strip, to preview wider LED spacing
 uint8_t gammaT[256];               // LEDs look too bright at low levels without this
 
 int ledIndex(int x, int y) {               // grid (x,y) -> position along the strip, skipping corner LEDs
@@ -73,6 +74,9 @@ void onMessage(char* t, byte* p, unsigned int len) {
     lastFrameMs = millis();
   } else if (len == 1) {                   // brightness 0-255 (capped)
     bright = min<int>(p[0], MAX_BRIGHT); FastLED.setBrightness(bright);
+  } else if (len == 3 && p[0] == 's' && p[1] == 'p') {   // spacing preview: "sp" + N
+    spacing = max<int>(1, p[2]); prefs.putUChar("spacing", spacing);
+    Serial.printf("Spacing preview: every %d LED(s)\n", spacing);
   } else if (len == 4 && memcmp(p, "test", 4) == 0) {
     testUntil = millis() + 12000;          // walk through the rows so you can check the layout
   }
@@ -95,6 +99,7 @@ void setup() {
   fill_solid(leds, NUM_LEDS, CRGB(40, 18, 6)); FastLED.show();   // warm "I'm awake" glow
 
   prefs.begin("lully", false);
+  spacing = prefs.getUChar("spacing", 1);
   String saved = prefs.getString("code", "");
   if (saved.length() == 0) {               // random, hard-to-guess default pairing code
     const char* al = "abcdefghjkmnpqrstuvwxyz23456789"; saved = "lully-";
@@ -150,7 +155,9 @@ void loop() {
   fill_solid(leds, NUM_LEDS, CRGB::Black);   // corner and spare LEDs stay off
   for (int y = 0; y < ROWS; y++) for (int x = 0; x < COLS; x++) {
     int g = (y * COLS + x) * 3;
-    leds[ledIndex(x, y)] = CRGB(gammaT[(uint8_t)cur[g]], gammaT[(uint8_t)cur[g + 1]], gammaT[(uint8_t)cur[g + 2]]);
+    int li = ledIndex(x, y);
+    if (spacing > 1 && (li % spacing) != 0) continue;   // spacing preview: the LEDs in between stay off
+    leds[li] = CRGB(gammaT[(uint8_t)cur[g]], gammaT[(uint8_t)cur[g + 1]], gammaT[(uint8_t)cur[g + 2]]);
   }
   FastLED.show();
 }
