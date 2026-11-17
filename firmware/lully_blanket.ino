@@ -10,7 +10,7 @@
     2. Library Manager: install "FastLED" (by Daniel Garcia), "WiFiManager" (by tzapu), "PubSubClient" (by Nick O'Leary).
     3. Plug in the ESP32 with a USB data cable, pick its port, click Upload.
 
-  First power-up: the board opens a Wi-Fi network called "Lully-setup" (password: lullylight). Join it from your phone, pick your
+  First power-up (or hold BOOT while pressing EN to start over): the board opens a Wi-Fi network called "Lully-setup" (password: lullylight). Join it from your phone, pick your
   home Wi-Fi, and note the pairing code shown there (you can change it). Type the same code into the
   app's "Blanket" button.
 */
@@ -103,6 +103,8 @@ void setup() {
   saved.toCharArray(code, sizeof(code));
 
   WiFiManager wm;
+  pinMode(0, INPUT_PULLUP);                // hold BOOT while pressing EN to forget Wi-Fi and reopen Lully-setup
+  if (digitalRead(0) == LOW) { Serial.println("BOOT held: forgetting Wi-Fi"); wm.resetSettings(); fill_solid(leds, NUM_LEDS, CRGB(0, 0, 40)); FastLED.show(); delay(1500); }
   WiFiManagerParameter pcode("code", "Pairing code (type this into the app)", code, 32);
   wm.addParameter(&pcode);
   wm.setConfigPortalTimeout(300);
@@ -120,6 +122,8 @@ void setup() {
 }
 
 void loop() {
+  static uint32_t lastInfo = 0;
+  if (millis() - lastInfo > 10000) { lastInfo = millis(); Serial.printf("Pairing code: %s  (relay %s)\n", code, mqtt.connected() ? "connected" : "not connected"); }
   if (!mqtt.connected()) connectMqtt();
   mqtt.loop();
 
