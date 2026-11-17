@@ -10,7 +10,7 @@
     2. Library Manager: install "FastLED" (by Daniel Garcia), "WiFiManager" (by tzapu), "PubSubClient" (by Nick O'Leary).
     3. Plug in the ESP32 with a USB data cable, pick its port, click Upload.
 
-  First power-up: the board opens a Wi-Fi network called "Lully-setup". Join it from your phone, pick your
+  First power-up: the board opens a Wi-Fi network called "Lully-setup" (password: lullylight). Join it from your phone, pick your
   home Wi-Fi, and note the pairing code shown there (you can change it). Type the same code into the
   app's "Blanket" button.
 */
@@ -82,14 +82,17 @@ void setup() {
 
   prefs.begin("lully", false);
   String saved = prefs.getString("code", "");
-  if (saved.length() == 0) { uint32_t m = (uint32_t)ESP.getEfuseMac(); saved = "lully-" + String(m % 100000); }
+  if (saved.length() == 0) {               // random, hard-to-guess default pairing code
+    const char* al = "abcdefghjkmnpqrstuvwxyz23456789"; saved = "lully-";
+    for (int i = 0; i < 8; i++) saved += al[esp_random() % 31];
+  }
   saved.toCharArray(code, sizeof(code));
 
   WiFiManager wm;
   WiFiManagerParameter pcode("code", "Pairing code (type this into the app)", code, 32);
   wm.addParameter(&pcode);
   wm.setConfigPortalTimeout(300);
-  if (!wm.autoConnect("Lully-setup")) { ESP.restart(); }
+  if (!wm.autoConnect("Lully-setup", "lullylight")) { ESP.restart(); }   // setup network password: lullylight
   strncpy(code, pcode.getValue(), sizeof(code) - 1);
   prefs.putString("code", code);
   snprintf(topic, sizeof(topic), "lully/%s/frame", code);
