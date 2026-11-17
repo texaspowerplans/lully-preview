@@ -22,14 +22,18 @@
 
 // ---------- your layout ----------
 #define DATA_PIN     13        // strip data wire -> GPIO 13 (through a 330 ohm resistor if you have one)
+#define STRIPS       1         // how many 160-LED strips are chained: 1 = 16x10 test, 2 = full 16x20
 #define COLS         16        // LEDs per folded row
-#define ROWS         20        // number of rows (2 strips x 10 rows)
+#define ROWS         (STRIPS * 10)  // 10 rows of 16 per strip
 #define SERPENTINE   true      // rows alternate direction (zigzag fold)
-#define MAX_MILLIAMPS 2000     // power limit for the whole strip (power bank USB: keep 2000 or less)
+#define MAX_MILLIAMPS (STRIPS * 1000)  // power limit for the whole setup (one strip: 1 A)
 #define MAX_BRIGHT   140       // 0-255 overall ceiling; it's under fabric, this is plenty
 // ----------------------------------
 
 #define NUM_LEDS (COLS * ROWS)
+#define FRAME_COLS 16          // the app always sends a 16 x 20 picture
+#define FRAME_ROWS 20
+#define FRAME_BYTES (FRAME_COLS * FRAME_ROWS * 3)
 CRGB leds[NUM_LEDS];
 float cur[NUM_LEDS * 3], tgt[NUM_LEDS * 3];
 
@@ -51,10 +55,15 @@ int ledIndex(int x, int y) {               // grid (x,y) -> position along the s
 }
 
 void onMessage(char* t, byte* p, unsigned int len) {
-  if (len == NUM_LEDS * 3) {               // a full frame: 16x20 RGB, row by row
-    for (int y = 0; y < ROWS; y++) for (int x = 0; x < COLS; x++) {
-      int src = (y * COLS + x) * 3, dst = ledIndex(x, y) * 3;
-      tgt[dst] = p[src]; tgt[dst + 1] = p[src + 1]; tgt[dst + 2] = p[src + 2];
+  if (len == FRAME_BYTES) {                // a 16x20 RGB picture, row by row; squeezed to fit however many rows we have
+    for (int y = 0; y < ROWS; y++) {
+      int r0 = y * FRAME_ROWS / ROWS, r1 = (y + 1) * FRAME_ROWS / ROWS; if (r1 <= r0) r1 = r0 + 1;
+      for (int x = 0; x < COLS; x++) {
+        float a = 0, b = 0, c = 0; int n = 0;
+        for (int r = r0; r < r1; r++) { int src = (r * FRAME_COLS + x) * 3; a += p[src]; b += p[src + 1]; c += p[src + 2]; n++; }
+        int dst = ledIndex(x, y) * 3;
+        tgt[dst] = a / n; tgt[dst + 1] = b / n; tgt[dst + 2] = c / n;
+      }
     }
     lastFrameMs = millis();
   } else if (len == 1) {                   // brightness 0-255 (capped)
@@ -99,7 +108,7 @@ void setup() {
   Serial.printf("Wi-Fi connected. Pairing code: %s\n", code);
 
   mqtt.setServer(BROKER, PORT);
-  mqtt.setBufferSize(NUM_LEDS * 3 + 128);
+  mqtt.setBufferSize(FRAME_BYTES + 128);
   mqtt.setCallback(onMessage);
   mqtt.setKeepAlive(30);
   for (int i = 0; i < NUM_LEDS * 3; i++) { cur[i] = 0; tgt[i] = 0; }
