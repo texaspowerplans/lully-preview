@@ -36,12 +36,15 @@ body.full .top,body.full .bottom{display:none}
 #stage{cursor:pointer;-webkit-tap-highlight-color:transparent}
 #fullhint{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);font-size:13px;padding:6px 12px;border-radius:999px;background:rgba(0,0,0,.45);color:#fff;opacity:0;transition:opacity .6s;pointer-events:none;white-space:nowrap}
 #fullhint.on{opacity:.85}
+#settings{display:none;max-height:42vh;overflow:auto;background:rgba(255,255,255,.05);border-radius:12px;padding:6px 10px 10px}
+#settings.open{display:block}
+.grp h3{font-size:11.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;opacity:.55;margin:8px 2px 6px}
 #warn{display:none;background:rgba(255,90,95,.18);padding:10px 12px;border-radius:10px;font-size:14px}
 </style>
 </head>
 <body>
 <div class="top">
-  <div><small>Lully blanket preview v29 · 4 × 5 ft · 320 LEDs</small><div id="scene">Ready</div><div id="layers"></div></div>
+  <div><small>Lully blanket preview v30 · 5 × 5 ft</small><div id="scene">Ready</div><div id="layers"></div></div>
   <div id="hit"></div>
 </div>
 <div id="stage"><canvas id="cv"></canvas><div id="fullhint"></div></div>
@@ -53,22 +56,31 @@ body.full .top,body.full .bottom{display:none}
   <div class="row">
     <button id="go">Start listening</button>
     <button id="demo" class="ghost">Demo</button>
-    <button id="aidemo" class="ghost">AI demo</button>
+    <button id="setbtn" class="ghost" aria-expanded="false">Settings</button>
   </div>
-  <div class="row">
-    <button id="fxmode" class="ghost chip" style="display:none">Effects: off</button>
-    <button id="scenesys" class="ghost chip">Scenes: AI recipes</button>
-    <button id="react" class="ghost chip">Reactivity</button>
-    <button id="brain" class="ghost chip">Scenes</button>
-    <button id="model" class="ghost chip">Model</button>
-    <button id="eng" class="ghost chip">Engine</button>
-    <button id="diff" class="ghost chip">Diffusion: plush</button>
-    <button id="leds" class="ghost chip">Show LEDs</button>
-    <button id="room" class="ghost chip">Room: bedtime lamp</button>
-    <button id="cloud" class="ghost chip">Cloud AI: off</button>
-    <button id="style" class="ghost chip">Style: soft glow</button>
-    <button id="blanket" class="ghost chip">Blanket: not connected</button>
-    <button id="spacing" class="ghost chip">LED spacing: every LED</button>
+  <div id="settings">
+    <div class="grp"><h3>Look</h3><div class="row">
+      <button id="style" class="ghost chip">Style: soft glow</button>
+      <button id="room" class="ghost chip">Room: bedtime lamp</button>
+      <button id="diff" class="ghost chip">Diffusion: plush</button>
+    </div></div>
+    <div class="grp"><h3>LEDs and the real blanket</h3><div class="row">
+      <button id="spacing" class="ghost chip">LED spacing: smooth</button>
+      <button id="leds" class="ghost chip">Show LEDs</button>
+      <button id="blanket" class="ghost chip">Blanket: not connected</button>
+    </div></div>
+    <div class="grp"><h3>Story AI</h3><div class="row">
+      <button id="react" class="ghost chip">Reactivity</button>
+      <button id="cloud" class="ghost chip">Cloud AI: off</button>
+      <button id="scenesys" class="ghost chip">Scenes: AI recipes</button>
+      <button id="brain" class="ghost chip">Scenes</button>
+      <button id="model" class="ghost chip">Model</button>
+    </div></div>
+    <div class="grp"><h3>Listening and demos</h3><div class="row">
+      <button id="eng" class="ghost chip">Engine</button>
+      <button id="aidemo" class="ghost chip">AI demo</button>
+      <button id="fxmode" class="ghost chip" style="display:none">Effects: off</button>
+    </div></div>
   </div>
   <div class="row"><form id="typed"><input id="line" placeholder="Or type a line" autocomplete="off"><button class="ghost">Go</button></form></div>
 </div>
@@ -168,8 +180,8 @@ const PAIRS={'northern lights':['L','aurora'],'lightning bugs':['L','fireflies']
 const STOPS={'storm passed':['storm','rain','wind'],'storm ended':['storm','rain','wind'],'rain stopped':['rain','storm'],'sun came':['storm','rain','fog'],
   'clouds cleared':['storm','rain','fog'],'skies cleared':['storm','rain','fog'],'wind died':['wind'],'fog lifted':['fog'],'snow stopped':['snowfall'],'stopped snowing':['snowfall']};
 
-// ---------- Blanket renderer: 4 ft x 5 ft, 16 x 20 = 320 LEDs on a 3-inch grid ----------
-const COLS=16,ROWS=20,N=COLS*ROWS;
+// ---------- Blanket renderer: 5 ft x 5 ft; the picture is computed on a 20 x 20 grid (3-inch cells) ----------
+const COLS=20,ROWS=20,N=COLS*ROWS,BLANKET_IN=60;
 let cv=document.getElementById('cv'),ctx=cv.getContext('2d');
 // Safari can drop a canvas's drawing memory under pressure; if that happens, swap in a fresh canvas and carry on
 function freshCanvas(){const n=document.createElement('canvas');n.id='cv';cv.replaceWith(n);cv=n;ctx=cv.getContext('2d');lastLayout='';layout()}
@@ -200,7 +212,7 @@ function layout(){
   const r=cv.parentElement.getBoundingClientRect();dpr=Math.min(2,window.devicePixelRatio||1);
   const key=Math.round(r.width)+'x'+Math.round(r.height)+'@'+dpr+document.body.classList.contains('full');if(key===lastLayout)return;lastLayout=key;W=r.width;H=r.height;
   cv.width=Math.max(1,W*dpr);cv.height=Math.max(1,H*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);
-  const pad=document.body.classList.contains('full')?6:16,ar=48/60;let h=H-pad*2,w=h*ar;if(w>W-pad*2){w=W-pad*2;h=w/ar}
+  const pad=document.body.classList.contains('full')?6:16,ar=1;let h=H-pad*2,w=h*ar;if(w>W-pad*2){w=W-pad*2;h=w/ar}
   bw=Math.max(10,w);bh=Math.max(10,h);bx=(W-bw)/2;by=(H-bh)/2;fabric=makeFabric(Math.round(bw*dpr),Math.round(bh*dpr));
 }
 let layoutT=0;const layoutSoon=()=>{clearTimeout(layoutT);layoutT=setTimeout(layout,150)};
@@ -341,15 +353,39 @@ function frameBody(now){
   ctx.fillStyle=`rgb(${Math.round(6+20*amb)},${Math.round(6+19*amb)},${Math.round(10+18*amb)})`;ctx.fillRect(0,0,W,H);
   ctx.save();ctx.shadowColor=`rgba(${sr/N|0},${sg/N|0},${sb/N|0},.55)`;ctx.shadowBlur=Math.min(W,H)*.12;rr(ctx,bx,by,bw,bh,18);ctx.fillStyle=`rgb(${fab})`;ctx.fill();ctx.restore();
   ctx.save();rr(ctx,bx,by,bw,bh,18);ctx.clip();ctx.fillStyle=`rgb(${fab})`;ctx.fillRect(bx,by,bw,bh);
-  ctx.globalCompositeOperation='screen';ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(Mc,bx,by,bw,bh);
-  if(hot>0){bctx.putImageData(bImg,0,0);ctx.globalAlpha=hot;ctx.drawImage(Bc,bx,by,bw,bh);ctx.globalAlpha=1}
+  ctx.globalCompositeOperation='screen';ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+  const spot=SPACING[spI].in>0;ctx.drawImage(spot?spotLayer(buf,soft):Mc,bx,by,bw,bh);
+  if(hot>0&&!spot){bctx.putImageData(bImg,0,0);ctx.globalAlpha=hot;ctx.drawImage(Bc,bx,by,bw,bh);ctx.globalAlpha=1}
   ctx.globalCompositeOperation='source-over';
   if(fabric)ctx.drawImage(fabric,bx,by,bw,bh);
-  if(showLeds){ctx.fillStyle='rgba(255,255,255,.55)';for(let j=0;j<ROWS;j++)for(let i=0;i<COLS;i++){ctx.beginPath();ctx.arc(bx+(i+.5)/COLS*bw,by+(j+.5)/ROWS*bh,1.6,0,7);ctx.fill()}}
+  if(showLeds){ctx.fillStyle='rgba(255,255,255,.55)';const sIn=SPACING[spI].in||3,n=Math.round(BLANKET_IN/sIn);for(let j=0;j<n;j++)for(let i=0;i<n;i++){ctx.beginPath();ctx.arc(bx+(i+.5)/n*bw,by+(j+.5)/n*bh,1.4,0,7);ctx.fill()}}
   ctx.restore();
 }
 requestAnimationFrame(frame);
-const DIFF=[{l:'Diffusion: plush',h:.15},{l:'Diffusion: thin sheet',h:.6},{l:'Diffusion: perfect',h:0}];let diffI=0;
+const DIFF=[{l:'Diffusion: plush',h:.15,sig:1.1},{l:'Diffusion: thin sheet',h:.6,sig:.6},{l:'Diffusion: perfect',h:0,sig:1.8}];let diffI=0;
+// LED spacing preview. Inches between LEDs; 0 = smooth (the picture as designed). The blanket strip gets "every Nth LED" (strip has 4 LEDs per inch).
+const SPACING=[{in:0,l:'LED spacing: smooth',strip:1},{in:1,l:'LED spacing: 1 inch',strip:4},{in:2,l:'LED spacing: 2 inches',strip:8},{in:3,l:'LED spacing: 3 inches',strip:12},{in:4,l:'LED spacing: 4 inches',strip:16}];
+let spI=0;try{spI=Math.min(SPACING.length-1,+localStorage.getItem('lullySpacing2')||0)}catch(e){}
+const PXI=2,GR=BLANKET_IN*PXI,Gc=document.createElement('canvas');Gc.width=GR;Gc.height=GR;const gctx=Gc.getContext('2d'),gImg=gctx.createImageData(GR,GR),gF=new Float32Array(GR*GR*3);
+let kernCache=null;
+function spotLayer(buf,soft){
+  const s=SPACING[spI].in,sig=DIFF[diffI].sig,n=Math.round(BLANKET_IN/s),rad=Math.ceil(sig*PXI*3),sp=sig*PXI;
+  if(!kernCache||kernCache.key!==s+'|'+sig){const k=[];const norm=(s*s)/(2*Math.PI*sig*sig);for(let dy=-rad;dy<=rad;dy++)for(let dx=-rad;dx<=rad;dx++)k.push(Math.exp(-(dx*dx+dy*dy)/(2*sp*sp))*norm);kernCache={key:s+'|'+sig,k}}
+  const K=kernCache.k,KW=rad*2+1;gF.fill(0);
+  for(let j=0;j<n;j++)for(let i=0;i<n;i++){
+    const xin=(i+.5)*s,yin=(j+.5)*s,cx=Math.max(0,Math.min(COLS-1.001,xin/BLANKET_IN*COLS-.5)),cy=Math.max(0,Math.min(ROWS-1.001,yin/BLANKET_IN*ROWS-.5)),x0=cx|0,y0=cy|0,ax=cx-x0,ay=cy-y0;
+    const q=(x,y,c)=>buf[(y*COLS+x)*3+c],col=[0,1,2].map(c=>soft(q(x0,y0,c)*(1-ax)*(1-ay)+q(x0+1,y0,c)*ax*(1-ay)+q(x0,y0+1,c)*(1-ax)*ay+q(x0+1,y0+1,c)*ax*ay));
+    if(col[0]+col[1]+col[2]<3)continue;
+    const px=Math.round(xin*PXI),py=Math.round(yin*PXI);let kk=0;
+    for(let dy=-rad;dy<=rad;dy++){let yy=py+dy;if(yy<0||yy>=GR){kk+=KW;continue}
+      for(let dx=-rad;dx<=rad;dx++,kk++){const xx=px+dx;if(xx<0||xx>=GR)continue;const w=K[kk],o=(yy*GR+xx)*3;gF[o]+=col[0]*w;gF[o+1]+=col[1]*w;gF[o+2]+=col[2]*w}}
+  }
+  const d=gImg.data;for(let p=0,o=0;p<GR*GR;p++,o+=3){d[p*4]=soft(gF[o]);d[p*4+1]=soft(gF[o+1]);d[p*4+2]=soft(gF[o+2]);d[p*4+3]=255}
+  gctx.putImageData(gImg,0,0);return Gc;
+}
+function setSpacing(k){spI=k;try{localStorage.setItem('lullySpacing2',spI)}catch(e){}document.getElementById('spacing').textContent=SPACING[spI].l;if(typeof Blanket!=='undefined')Blanket.spacing(SPACING[spI].strip)}
+document.getElementById('spacing').addEventListener('click',()=>{setSpacing((spI+1)%SPACING.length);showHit(SPACING[spI].l.replace('LED spacing: ','Spacing: '))});
+document.getElementById('spacing').textContent=SPACING[spI].l;
 document.getElementById('diff').addEventListener('click',e=>{diffI=(diffI+1)%DIFF.length;hot=DIFF[diffI].h;e.currentTarget.textContent=DIFF[diffI].l});
 document.getElementById('room').addEventListener('click',e=>{roomI=(roomI+1)%ROOM.length;e.currentTarget.textContent=ROOM[roomI].l});
 document.getElementById('leds').addEventListener('click',e=>{showLeds=!showLeds;e.currentTarget.textContent=showLeds?'Hide LEDs':'Show LEDs'});
@@ -647,7 +683,7 @@ const Mood=(function(){
     cloud:{cols:[[235,235,245],[210,220,240]],size:3.6,n:3,life:18,v:[.12,.12],sway:0,stretch:1.7,spin:0}};
   const FX2MOTIF={leaf:'leaf',petal:'petal',snowflake:'flake',ember:'ember',hearth:'ember',star:'star',firefly:'firefly',bubble:'bubble',cloud:'cloud'};
   let sleepUntil=0,on=true,cur=null,tgt=null,motif=null,motifHold=0,last=0,T=0,dir=Math.random()*6.28;const items=[];
-  const blobs=Array.from({length:6},(_,i)=>({x:Math.random()*16,y:Math.random()*20,vx:(Math.random()-.5)*.3,vy:(Math.random()-.5)*.3,r:4+Math.random()*2.5,ci:i%4,ph:Math.random()*6.28}));
+  const blobs=Array.from({length:6},(_,i)=>({x:Math.random()*COLS,y:Math.random()*ROWS,vx:(Math.random()-.5)*.3,vy:(Math.random()-.5)*.3,r:4+Math.random()*2.5,ci:i%4,ph:Math.random()*6.28}));
   const lerp=(a,b,k)=>a+(b-a)*k,lc=(a,b,k)=>[lerp(a[0],b[0],k),lerp(a[1],b[1],k),lerp(a[2],b[2],k)];
   function rich(c,amt){const l=(c[0]+c[1]+c[2])/3;let o=c.map(x=>Math.max(0,l+(x-l)*amt));const mx=Math.max(1,...o),k=225/mx;return o.map(x=>Math.min(255,x*k))}
   function setFromStory(A,B,br,drift,fx){
@@ -697,7 +733,7 @@ const Mood=(function(){
 const Blanket=(function(){
   const btn=document.getElementById('blanket');let client=null,code='',topic='',lastSend=0,ok=false;
   try{code=localStorage.getItem('lullyBlanket')||''}catch(e){}
-  const out=new Uint8Array(N*3);
+  const out=new Uint8Array(16*20*3);
   function label(t){btn.textContent=t}
   function loadLib(){return new Promise((res,rej)=>{if(window.mqtt)return res();const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s)})}
   async function connect(){
@@ -706,7 +742,7 @@ const Blanket=(function(){
     if(client)try{client.end(true)}catch(e){}
     topic='lully/'+code+'/frame';
     client=mqtt.connect('wss://broker.emqx.io:8084/mqtt',{clientId:'lully-app-'+Math.random().toString(16).slice(2,10),reconnectPeriod:2000,connectTimeout:8000});
-    client.on('connect',()=>{ok=true;label('Blanket: '+code+' ✓')});
+    client.on('connect',()=>{ok=true;label('Blanket: '+code+' ✓');try{client.publish(topic,new Uint8Array([115,112,SPACING[spI].strip]))}catch(e){}});
     client.on('close',()=>{ok=false;label('Blanket: reconnecting…')});
     client.on('error',()=>{ok=false;label('Blanket: relay error')});
   }
@@ -718,25 +754,20 @@ const Blanket=(function(){
   if(code)connect();
   function send(buf,now){
     if(!ok||now-lastSend<100)return;lastSend=now;
-    for(let k=0;k<N*3;k++){let v=buf[k];v=v<=0?0:v<200?v:200+55*(1-Math.exp(-(v-200)/55));out[k]=v}
+    const sv=v=>v<=0?0:v<200?v:200+55*(1-Math.exp(-(v-200)/55));
+    for(let fy=0;fy<20;fy++)for(let fx=0;fx<16;fx++){const cx=Math.max(0,Math.min(COLS-1.001,(fx+.5)*COLS/16-.5)),cy=Math.max(0,Math.min(ROWS-1.001,(fy+.5)*ROWS/20-.5)),
+      x0=cx|0,y0=cy|0,ax=cx-x0,ay=cy-y0;
+      for(let c=0;c<3;c++){const g=(x,y)=>buf[(y*COLS+x)*3+c];
+        out[(fy*16+fx)*3+c]=sv(g(x0,y0)*(1-ax)*(1-ay)+g(x0+1,y0)*ax*(1-ay)+g(x0,y0+1)*(1-ax)*ay+g(x0+1,y0+1)*ax*ay)}}
     try{client.publish(topic,out,{qos:0})}catch(e){}
   }
-  // spacing preview: the test strip has 160 LEDs per meter (one every ~1/4 inch); light only every Nth one
-  const SP=[{n:1,l:'every LED'},{n:4,l:'1 inch'},{n:8,l:'2 inches'},{n:12,l:'3 inches'},{n:16,l:'4 inches'}];let spI=0;
-  try{spI=+localStorage.getItem('lullySpacing')||0}catch(e){}
-  const spBtn=document.getElementById('spacing');const spLabel=()=>spBtn.textContent='LED spacing: '+SP[spI].l;spLabel();
-  spBtn.addEventListener('click',()=>{
-    if(!ok){showHit('Connect the blanket first');return}
-    spI=(spI+1)%SP.length;try{localStorage.setItem('lullySpacing',spI)}catch(e){}spLabel();
-    client.publish(topic,new Uint8Array([115,112,SP[spI].n]));showHit('Spacing: '+SP[spI].l);
-  });
-  return{send,on:()=>ok};
+  return{send,on:()=>ok,spacing(n){if(ok)try{client.publish(topic,new Uint8Array([115,112,n]))}catch(e){}}};
 })();
 // ---- Cloud AI painter (optional): each finished sentence's TEXT (never audio) goes to a private relay.
 // Claude imagines the scene and writes a tiny light-painting program for the 16x20 grid; it runs sandboxed in a Web Worker.
 // The on-device model keeps reacting instantly until Claude's painting fades in.
-const PAINT_PROMPT="You are the light artist for Lully, a children's blanket with a 16 x 20 grid of RGB LEDs under white plush fabric. The fabric diffuses the light into soft glowing color, like a painting made of light. A story is being read aloud. For each new sentence, decide whether the blanket's living picture should change, and if so, paint the new one as code.\n\nThe blanket has no top or bottom; it lies on a bed and is seen from any side. Fill the whole blanket. Think in abstract, impressionist terms, like light painting rather than a drawing: prefer textures and light spread over the whole blanket to one small object in the middle; imagine the scene the words conjure, then translate its colors, light and motion onto the grid. Vivid, saturated, luminous color; use the full RGB range. Rich gradients and several hues, never flat gray or muddy. Darkness only where the scene is truly dark (night), and even then keep deep, beautiful color (navy, indigo, violet).\n\nMotion must be physically believable and lively:\n- lightning: sudden, near-instant, blinding white-violet branching bolt or whole-blanket flash lasting ~0.1-0.2 s, sometimes a double flicker, then darkness, repeating every few seconds at random-looking intervals\n- fire, embers: many fast flickering warm pixels; embers rise quickly and fade; hearth glow pulses irregularly\n- snow and rain: many particles at their real speeds (rain fast streaks, snow slow drifting with sway); direction is arbitrary but consistent\n- water: rolling waves, caustic shimmer; stars: still points with gentle twinkle; fireflies: blink on and off while wandering\n- sunshine, meadows, sky: broad warm gradients that breathe slowly\n\nWrite the body of a JavaScript function  paint(x, y, t)  that returns [r, g, b] with each 0-255, for LED column x (0-15), row y (0-19), at time t in seconds since this scene began. It is called for all 320 LEDs about 30 times per second, so keep it light. Plain ES2017 only. Available helpers (do not redefine): W=16, H=20, PI, sin, cos, abs, floor, min, max, sqrt, pow, exp, hash(n) -> 0..1 deterministic, noise(x,y,z) -> smooth 0..1, hsv(h,s,v) -> [r,g,b] with h in 0..1, mix(a,b,k) mixes two colors, clamp(v,a,b), wrapd(ax,ay,bx,by) -> distance on the wrap-around blanket. For many particles, loop over i with positions derived from hash(i) and t, wrapping with ((v % W) + W) % W. Use additive light: start from a background color and add glowing things on top. Be concise: at most 25 short lines, no comments, no explanation. Speed matters: the picture must appear within a couple of seconds.\n\nReply in exactly this format and nothing else:\nTITLE: short name of the picture\n```js\nfunction body here\n```\nIf the newest sentence does not change what the reader would picture (same place, nothing new appearing or happening), reply with only the word: KEEP\n";
-const PAINT_HELPERS="const W=16,H=20,PI=Math.PI,{sin,cos,abs,floor,min,max,sqrt,pow,exp,atan2,round}=Math;\nconst hash=n=>{const s=Math.sin(n*127.1+311.7)*43758.5453;return s-Math.floor(s)};\nconst h3=(x,y,z)=>hash(x*157+y*113+z*271);\nconst sm=t=>t*t*(3-2*t);\nfunction noise(x,y,z){const X=floor(x),Y=floor(y),Z=floor(z),fx=sm(x-X),fy=sm(y-Y),fz=sm(z-Z);const L=(a,b,t)=>a+(b-a)*t;\n return L(L(L(h3(X,Y,Z),h3(X+1,Y,Z),fx),L(h3(X,Y+1,Z),h3(X+1,Y+1,Z),fx),fy),L(L(h3(X,Y,Z+1),h3(X+1,Y,Z+1),fx),L(h3(X,Y+1,Z+1),h3(X+1,Y+1,Z+1),fx),fy),fz)}\nfunction hsv(h,s,v){h=((h%1)+1)%1;const i=floor(h*6),f=h*6-i,p=v*(1-s),q=v*(1-f*s),u=v*(1-(1-f)*s);const c=[[v,u,p],[q,v,p],[p,v,u],[p,q,v],[u,p,v],[v,p,q]][i%6];return c.map(k=>k*255)}\nconst mix=(a,b,k)=>[a[0]+(b[0]-a[0])*k,a[1]+(b[1]-a[1])*k,a[2]+(b[2]-a[2])*k];\nconst clamp=(v,a,b)=>v<a?a:v>b?b:v;\nfunction wrapd(ax,ay,bx,by){let dx=abs(ax-bx)%W,dy=abs(ay-by)%H;dx=min(dx,W-dx);dy=min(dy,H-dy);return sqrt(dx*dx+dy*dy)}\n";
+const PAINT_PROMPT="You are the light artist for Lully, a children's blanket with a 20 x 20 grid of RGB LEDs under white plush fabric. The fabric diffuses the light into soft glowing color, like a painting made of light. A story is being read aloud. For each new sentence, decide whether the blanket's living picture should change, and if so, paint the new one as code.\n\nThe blanket has no top or bottom; it lies on a bed and is seen from any side. Fill the whole blanket. Think in abstract, impressionist terms, like light painting rather than a drawing: prefer textures and light spread over the whole blanket to one small object in the middle; imagine the scene the words conjure, then translate its colors, light and motion onto the grid. Vivid, saturated, luminous color; use the full RGB range. Rich gradients and several hues, never flat gray or muddy. Darkness only where the scene is truly dark (night), and even then keep deep, beautiful color (navy, indigo, violet).\n\nMotion must be physically believable and lively:\n- lightning: sudden, near-instant, blinding white-violet branching bolt or whole-blanket flash lasting ~0.1-0.2 s, sometimes a double flicker, then darkness, repeating every few seconds at random-looking intervals\n- fire, embers: many fast flickering warm pixels; embers rise quickly and fade; hearth glow pulses irregularly\n- snow and rain: many particles at their real speeds (rain fast streaks, snow slow drifting with sway); direction is arbitrary but consistent\n- water: rolling waves, caustic shimmer; stars: still points with gentle twinkle; fireflies: blink on and off while wandering\n- sunshine, meadows, sky: broad warm gradients that breathe slowly\n\nWrite the body of a JavaScript function  paint(x, y, t)  that returns [r, g, b] with each 0-255, for LED column x (0-19), row y (0-19), at time t in seconds since this scene began. It is called for all 400 LEDs about 30 times per second, so keep it light. Plain ES2017 only. Available helpers (do not redefine): W=20, H=20, PI, sin, cos, abs, floor, min, max, sqrt, pow, exp, hash(n) -> 0..1 deterministic, noise(x,y,z) -> smooth 0..1, hsv(h,s,v) -> [r,g,b] with h in 0..1, mix(a,b,k) mixes two colors, clamp(v,a,b), wrapd(ax,ay,bx,by) -> distance on the wrap-around blanket. For many particles, loop over i with positions derived from hash(i) and t, wrapping with ((v % W) + W) % W. Use additive light: start from a background color and add glowing things on top. Be concise: at most 25 short lines, no comments, no explanation. Speed matters: the picture must appear within a couple of seconds.\n\nReply in exactly this format and nothing else:\nTITLE: short name of the picture\n```js\nfunction body here\n```\nIf the newest sentence does not change what the reader would picture (same place, nothing new appearing or happening), reply with only the word: KEEP\n";
+const PAINT_HELPERS="const W=20,H=20,PI=Math.PI,{sin,cos,abs,floor,min,max,sqrt,pow,exp,atan2,round}=Math;\nconst hash=n=>{const s=Math.sin(n*127.1+311.7)*43758.5453;return s-Math.floor(s)};\nconst h3=(x,y,z)=>hash(x*157+y*113+z*271);\nconst sm=t=>t*t*(3-2*t);\nfunction noise(x,y,z){const X=floor(x),Y=floor(y),Z=floor(z),fx=sm(x-X),fy=sm(y-Y),fz=sm(z-Z);const L=(a,b,t)=>a+(b-a)*t;\n return L(L(L(h3(X,Y,Z),h3(X+1,Y,Z),fx),L(h3(X,Y+1,Z),h3(X+1,Y+1,Z),fx),fy),L(L(h3(X,Y,Z+1),h3(X+1,Y,Z+1),fx),L(h3(X,Y+1,Z+1),h3(X+1,Y+1,Z+1),fx),fy),fz)}\nfunction hsv(h,s,v){h=((h%1)+1)%1;const i=floor(h*6),f=h*6-i,p=v*(1-s),q=v*(1-f*s),u=v*(1-(1-f)*s);const c=[[v,u,p],[q,v,p],[p,v,u],[p,q,v],[u,p,v],[v,p,q]][i%6];return c.map(k=>k*255)}\nconst mix=(a,b,k)=>[a[0]+(b[0]-a[0])*k,a[1]+(b[1]-a[1])*k,a[2]+(b[2]-a[2])*k];\nconst clamp=(v,a,b)=>v<a?a:v>b?b:v;\nfunction wrapd(ax,ay,bx,by){let dx=abs(ax-bx)%W,dy=abs(ay-by)%H;dx=min(dx,W-dx);dy=min(dy,H-dy);return sqrt(dx*dx+dy*dy)}\n";
 const Painter=(function(){
   let slow=0,skip=false,worker=null,fn=null,frameBuf=null,lastFrameAt=0,from=null,since=0,active=false,title='',fadeOutAt=0,code0='',gotFrame=false,mode='';
   const shown=new Float32Array(N*3);
@@ -778,6 +809,7 @@ setInterval(()=>{const t=(performance.now()-t0)/1000;let k=0;
   return{start,blend,mode:()=>mode,stop(){if(active&&!fadeOutAt)fadeOutAt=performance.now()},title:()=>title,active:()=>active};
 })();
 window.LullyMood=Mood;
+document.getElementById('setbtn').addEventListener('click',e=>{const p=document.getElementById('settings'),o=p.classList.toggle('open');e.currentTarget.setAttribute('aria-expanded',o);e.currentTarget.textContent=o?'Close settings':'Settings'});
 document.getElementById('style').addEventListener('click',e=>{const o=Mood.toggle();e.target.textContent=o?'Style: soft glow':'Style: classic'});
 const Cloud=(function(){
   const btn=document.getElementById('cloud');let mode='off',url='https://lully-relay.jdustinstone.workers.dev',pass='',story=[],busy=false,queued=null;
