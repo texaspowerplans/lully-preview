@@ -54,6 +54,10 @@ uint8_t bright = MAX_BRIGHT;
 uint8_t spacing = 1;                 // light only every Nth LED along the strip, to preview wider LED spacing
 uint8_t gammaT[256];               // LEDs look too bright at low levels without this
 
+// status shown on the strip while not receiving the app's colors
+void statusColor(CRGB c) { fill_solid(leds, NUM_LEDS, c); FastLED.show(); }
+char statusTopic[64];
+
 int ledIndex(int x, int y) {               // grid (x,y) -> position along the strip, skipping corner LEDs
   if (SERPENTINE && (y & 1)) x = COLS - 1 - x;
   return y * (COLS + TURN_LEDS) + x;
@@ -85,7 +89,11 @@ void onMessage(char* t, byte* p, unsigned int len) {
 void connectMqtt() {
   while (!mqtt.connected()) {
     String id = "lully-" + String((uint32_t)ESP.getEfuseMac(), HEX);
-    if (mqtt.connect(id.c_str())) { mqtt.subscribe(topic); Serial.printf("Relay connected, listening on %s\n", topic); }
+    if (mqtt.connect(id.c_str(), statusTopic, 0, true, "offline")) {   // the app sees "offline" automatically if the blanket drops off
+      mqtt.subscribe(topic); mqtt.publish(statusTopic, "online", true);
+      Serial.printf("Relay connected, listening on %s\n", topic);
+      if (lastFrameMs == 0) statusColor(CRGB(40, 18, 6));   // dim WARM = online, waiting for the app
+    }
     else { Serial.println("Relay not reachable, retrying..."); delay(2000); }
   }
 }
@@ -96,7 +104,7 @@ void setup() {
   FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
   FastLED.setMaxPowerInVoltsAndMilliamps(5, MAX_MILLIAMPS);
   FastLED.setBrightness(bright);
-  fill_solid(leds, NUM_LEDS, CRGB(40, 18, 6)); FastLED.show();   // warm "I'm awake" glow
+  statusColor(CRGB(0, 0, 30));            // dim BLUE = looking for Wi-Fi
 
   prefs.begin("lully", false);
   spacing = prefs.getUChar("spacing", 1);
@@ -113,10 +121,13 @@ void setup() {
   WiFiManagerParameter pcode("code", "Pairing code (type this into the app)", code, 32);
   wm.addParameter(&pcode);
   wm.setConfigPortalTimeout(300);
+  wm.setAPCallback([](WiFiManager*) { statusColor(CRGB(0, 30, 30)); Serial.println("Setup mode: join Lully-setup"); });   // dim CYAN = setup network open
   if (!wm.autoConnect("Lully-setup", "lullylight")) { ESP.restart(); }   // setup network password: lullylight
   strncpy(code, pcode.getValue(), sizeof(code) - 1);
   prefs.putString("code", code);
   snprintf(topic, sizeof(topic), "lully/%s/frame", code);
+  snprintf(statusTopic, sizeof(statusTopic), "lully/%s/status", code);
+  statusColor(CRGB(25, 0, 30));            // dim PURPLE = on Wi-Fi, reaching the relay
   Serial.printf("Wi-Fi connected. Pairing code: %s\n", code);
 
   mqtt.setServer(BROKER, PORT);
@@ -155,11 +166,12 @@ void loop() {
     FastLED.show(); return;
   }
 
+  if (lastFrameMs == 0) return;            // keep showing the status color until the app sends something
   // no frames for 20 s (phone closed): fade down to a faint warm glow
   bool stale = now - lastFrameMs > 20000;
   float k = stale ? 0.01f : 0.12f;        // glide toward the newest frame
   for (int i = 0; i < GRID * 3; i++) {
-    float target = stale ? ((i % 3 == 0) ? 18 : (i % 3 == 1) ? 8 : 3) : tgt[i];
+    float target = stale ? ((i % 3 == 0) ? 60 : (i % 3 == 1) ? 30 : 10) : tgt[i];
     cur[i] += (target - cur[i]) * k;
   }
   fill_solid(leds, NUM_LEDS, CRGB::Black);   // corner and spare LEDs stay off
