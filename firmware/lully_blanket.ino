@@ -10,7 +10,7 @@
     2. Library Manager: install "FastLED" (by Daniel Garcia), "WiFiManager" (by tzapu), "PubSubClient" (by Nick O'Leary).
     3. Plug in the ESP32 with a USB data cable, pick its port, click Upload.
 
-  First power-up, or when the saved Wi-Fi isn't found (or after holding BOOT for 3 s while it runs): the board opens a Wi-Fi network called "Lully-setup" (password: lullylight). Join it from your phone, pick your
+  First power-up, or when the saved Wi-Fi isn't found within 25 s, or if you press BOOT while the strip glows white at startup: the board opens a Wi-Fi network called "Lully-setup" (password: lullylight). Join it from your phone, pick your
   home Wi-Fi, and note the pairing code shown there (you can change it). Type the same code into the
   app's "Blanket" button.
 */
@@ -116,13 +116,30 @@ void setup() {
   saved.toCharArray(code, sizeof(code));
 
   WiFiManager wm;
-  pinMode(0, INPUT_PULLUP);                // BOOT button: hold 3 s any time while running to forget Wi-Fi (see loop)
-  wm.setConnectTimeout(20);                // if the saved Wi-Fi isn't around, open Lully-setup after 20 s
+  pinMode(0, INPUT_PULLUP);
   WiFiManagerParameter pcode("code", "Pairing code (type this into the app)", code, 32);
   wm.addParameter(&pcode);
-  wm.setConfigPortalTimeout(300);
-  wm.setAPCallback([](WiFiManager*) { statusColor(CRGB(0, 30, 30)); Serial.println("Setup mode: join Lully-setup"); });   // dim CYAN = setup network open
-  if (!wm.autoConnect("Lully-setup", "lullylight")) { ESP.restart(); }   // setup network password: lullylight
+  wm.setConfigPortalTimeout(600);
+  wm.setAPCallback([](WiFiManager*) { statusColor(CRGB(0, 30, 30)); Serial.println("Setup mode: join Lully-setup (password lullylight)"); });
+
+  // 1) For 4 seconds after power-up the strip glows dim WHITE: press BOOT now to forget Wi-Fi and go straight to setup.
+  statusColor(CRGB(20, 20, 20));
+  Serial.println("Press BOOT within 4 s to reset Wi-Fi");
+  bool forceSetup = false;
+  for (uint32_t t0 = millis(); millis() - t0 < 4000; delay(10)) if (digitalRead(0) == LOW) { forceSetup = true; break; }
+
+  // 2) Otherwise try the saved Wi-Fi for 25 seconds (dim BLUE).
+  bool online = false;
+  if (forceSetup) { Serial.println("BOOT pressed: forgetting Wi-Fi"); wm.resetSettings(); }
+  else {
+    statusColor(CRGB(0, 0, 30));
+    WiFi.mode(WIFI_STA); WiFi.begin();                    // saved network
+    for (uint32_t t0 = millis(); millis() - t0 < 25000 && WiFi.status() != WL_CONNECTED; delay(200)) {}
+    online = WiFi.status() == WL_CONNECTED;
+    Serial.println(online ? "Joined saved Wi-Fi" : "Saved Wi-Fi not found");
+  }
+  // 3) No luck: open the Lully-setup network (dim CYAN) for 10 minutes, then try again from the start.
+  if (!online && !wm.startConfigPortal("Lully-setup", "lullylight")) { ESP.restart(); }
   strncpy(code, pcode.getValue(), sizeof(code) - 1);
   prefs.putString("code", code);
   snprintf(topic, sizeof(topic), "lully/%s/frame", code);
