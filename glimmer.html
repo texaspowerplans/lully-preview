@@ -47,6 +47,7 @@ a{color:var(--accent)}
 <button id="blanket">Blanket: not connected</button>
 <div id="warn"></div>
 <div id="status">Tap Start, allow the microphone, then read a story out loud.</div>
+<div id="diag" class="note" style="padding:4px 0 0"></div>
 <div id="heard"></div>
 <details><summary>Try it without reading</summary>
   <div class="try" id="tryBtns"></div>
@@ -55,7 +56,7 @@ a{color:var(--accent)}
 <details><summary>Settings</summary>
   <label>Child's name <input type="text" id="name" placeholder="optional" autocomplete="off"></label>
   <label>Stories tonight <select id="stories"><option>1</option><option selected>2</option><option>3</option></select></label>
-  <label>Brightness <input type="range" id="bright" min="20" max="100" value="80"></label>
+  <label>Brightness <input type="range" id="bright" min="20" max="100" value="100"></label>
   <label>Quick demo (a whole night in about 4 min) <input type="checkbox" id="quick"></label>
   <label>Two readers taking turns <input type="checkbox" id="two"></label>
   <div class="note" id="privacy">Listening happens on this phone. The speech model (about 40 MB) downloads once. No audio is recorded or sent anywhere; only light colors go to the blanket.</div>
@@ -81,7 +82,7 @@ const U=new Float32Array(N),V=new Float32Array(N),R=new Float32Array(N);
 for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;U[i]=(x+.5)/W*2-1;V[i]=(y+.5)/H*2-1;R[i]=Math.hypot(U[i],V[i])/Math.SQRT2}
 
 // ---------------- Settings ----------------
-const set={name:'',stories:2,bright:80,quick:false,two:false};
+const set={name:'',stories:2,bright:100,quick:false,two:false};
 try{Object.assign(set,JSON.parse(localStorage.getItem('glimmerSettings')||'{}'))}catch(e){}
 function saveSet(){try{localStorage.setItem('glimmerSettings',JSON.stringify(set))}catch(e){}}
 $('name').value=set.name;$('stories').value=String(set.stories);$('bright').value=set.bright;$('quick').checked=set.quick;$('two').checked=set.two;
@@ -99,6 +100,13 @@ function status(s){$('status').textContent=s}
 function say(s){const w=$('warn');w.style.display=s?'block':'none';w.textContent=s||''}
 let heardFinal='',heardPartial='';
 function renderHeard(){const f=heardFinal.slice(-120);$('heard').innerHTML='';const a=document.createElement('span');a.textContent=f+' ';const b=document.createElement('i');b.textContent=heardPartial;$('heard').append(a,b)}
+
+// ---------------- Diagnostics ----------------
+const Diag={level:0,words:0,sent:0,blanket:null,lastDraw:0};
+function drawDiag(now){if(now-Diag.lastDraw<400)return;Diag.lastDraw=now;
+  const mic=!Voice.ready?'off':(Voice.active?'hearing you':'quiet')+' ('+Math.round(Math.min(1,Diag.level*60)*100)+'%)';
+  const bl=Diag.blanket===null?(Blanket.on()?'relay connected':'not connected'):(Diag.blanket?'online':'OFFLINE');
+  $('diag').textContent='Mic: '+mic+' · words heard: '+Diag.words+' · blanket: '+bl+(Blanket.on()?' · frames sent: '+Diag.sent:'')}
 
 // ---------------- Voice analysis (raw microphone) ----------------
 const Voice={ready:false,env:0,fast:0,slow:0,floor:.003,avg:.02,active:false,voiced:false,pitch:0,pitchRef:180,loud:.5,whisperAcc:0,whisper:false,
@@ -122,9 +130,9 @@ function voiceTick(dt,now){
   const V=Voice;let rms=0,pitch=0,activeNow=false,voicedNow=false;
   if(an){an.getFloatTimeDomainData(tbuf);let s=0;for(let i=0;i<tbuf.length;i++)s+=tbuf[i]*tbuf[i];rms=Math.sqrt(s/tbuf.length)}
   V.fast+= (rms-V.fast)*Math.min(1,dt/.03);V.slow+=(rms-V.slow)*Math.min(1,dt/.15);V.env=V.fast;
-  if(rms<V.floor*1.3)V.floor=lerp(V.floor,Math.max(rms,1e-4),Math.min(1,dt/1.5));else V.floor*=1+dt*.02;
-  V.floor=clamp(V.floor,8e-5,.05);
-  const thrOn=Math.max(V.floor*3.2,.0018),thrOff=Math.max(V.floor*2.2,.0012);
+  if(rms<V.floor*1.3)V.floor=lerp(V.floor,Math.max(rms,1e-4),Math.min(1,dt/1.5));else if(!V.active)V.floor*=1+dt*.05;
+  V.floor=clamp(V.floor,5e-5,.03);Diag.level=lerp(Diag.level,rms,.3);
+  const thrOn=Math.max(V.floor*2.6,.0007),thrOff=Math.max(V.floor*1.8,.0005);
   activeNow=an?(V.active?V.env>thrOff:V.env>thrOn):false;
   if(activeNow&&an){pitch=detectPitch(tbuf,ac.sampleRate);voicedNow=pitch>0}
   // simulated voice from the try buttons
@@ -188,7 +196,9 @@ function finalText(t){const ws=t.trim().split(/\s+/).filter(Boolean);for(let j=0
 async function startMic(){
   ac=new (window.AudioContext||window.webkitAudioContext)();if(ac.resume)await ac.resume();
   status('Asking for the microphone…');
-  stream=await navigator.mediaDevices.getUserMedia({video:false,audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false,channelCount:1}});
+  stream=await navigator.mediaDevices.getUserMedia({video:false,audio:{echoCancellation:true,noiseSuppression:true,channelCount:1}});
+  if(ac.state!=='running')try{await ac.resume()}catch(_){}
+  ac.onstatechange=()=>{if(ac&&ac.state!=='running'&&running)ac.resume().catch(()=>{})};
   src=ac.createMediaStreamSource(stream);an=ac.createAnalyser();an.fftSize=2048;tbuf=new Float32Array(an.fftSize);src.connect(an);Voice.ready=true;
   $('mic').style.display='block';
   status('Glimmer can hear you. Loading the word listener (about 40 MB the first time)…');
@@ -327,7 +337,7 @@ function scene(name,i,u,v,r,t,o){
     case 'home':k=noise(u*1.4,v*1.4,t*.12);s=(.36+.1*(1-r))*(.85+.15*noise(t*.6,1,2));break;
     case 'sad':k=noise(u,v+3,t*.025);s=.28;break;
   }
-  o[0]=(A[0]+(B[0]-A[0])*k)*s;o[1]=(A[1]+(B[1]-A[1])*k)*s;o[2]=(A[2]+(B[2]-A[2])*k)*s;
+  s*=1.7;o[0]=(A[0]+(B[0]-A[0])*k)*s;o[1]=(A[1]+(B[1]-A[1])*k)*s;o[2]=(A[2]+(B[2]-A[2])*k)*s;
   if(name==='night'){const h=hash(i*3.1+.5);if(h>.86){const tw=.22*(.65+.35*Math.sin(t*1.1+h*40));o[0]+=tw;o[1]+=tw*.95;o[2]+=tw*.85}}
 }
 
@@ -391,7 +401,7 @@ function doYawn(label){const now=performance.now();yawnFx=now;showAccent('Glimme
 // ---------------- What was heard ----------------
 let lastHeard=0;
 function heardWord(w){
-  w=w.toLowerCase().replace(/[^a-z']/g,'');if(!w)return;lastHeard=performance.now();
+  w=w.toLowerCase().replace(/[^a-z']/g,'');if(!w)return;lastHeard=performance.now();Diag.words++;
   if(!active())return;
   if(Tide.phase==='dozing')toWake();
   if(!inStory())return;   // during the goodnight ritual, words only put lights to bed
@@ -425,7 +435,7 @@ function heardSentence(t){
 const frame=new Uint8Array(N*3),prevOut=new Float32Array(N*3),img=$('c').getContext('2d').createImageData(W,H),ctx=$('c').getContext('2d');
 let sceneT=0,lastT=performance.now(),cx=0,glowR=.2;
 const o=[0,0,0],o2=[0,0,0];
-function soft(x){return x<.8?x:.8+.2*(1-Math.exp(-(x-.8)/.2))}
+function soft(x){return x<.85?x:.85+.15*(1-Math.exp(-(x-.85)/.15))}
 function renderTick(now,dt){
   const T=Tide,sp=T.speed;sceneT+=dt*sp;
   if(Mood.mix<1)Mood.mix=Math.min(1,Mood.mix+dt/(6/sp));
@@ -437,14 +447,14 @@ function renderTick(now,dt){
   const pres=showVoice?V.presence:0,idleBreath=.5+.5*Math.sin(now/1000*2*Math.PI/5);
   const pr=(V.pitch&&V.pitchRef)?clamp(Math.log2(V.pitch/V.pitchRef)*1.6,-1,1):0;
   const gcol=V.whisper?[1,.7,.35]:pr<0?[1,lerp(.68,.38,-pr),lerp(.3,.06,-pr)]:[1,lerp(.68,.86,pr),lerp(.3,.6,pr)];
-  const gI=V.whisper?.85:.45+.35*V.loud;
+  const gI=V.whisper?1:.6+.4*V.loud;
   const pace=V.onsets.length/2,shimmer=showVoice?pres*clamp((pace-3)/3+Math.max(0,pr-.4),0,1)*.35:0;
   ripples=ripples.filter(rp=>(now-rp.born)/1000<rp.life);
   stars=stars.filter(s=>now-s.born<45000);
   const yawnP=yawnFx?(now-yawnFx)/3000:2,yawnK=yawnP<1?1-.45*Math.sin(Math.PI*yawnP):1,yawnS=yawnP<1?1+.5*Math.sin(Math.PI*yawnP):1;
   const tau=Mood.tense,w=T.warm,peak=T.level*set.bright/100*255,maxStep=255*dt/.3;
   const thinkA=Think.on?Math.min(1,(now-Think.since)/800):0;if(Think.on&&now-Think.since>15000)Think.on=false;
-  const ember=T.phase==='dozing'||T.phase==='asleep'?(.25+.2*idleBreath):T.phase==='night'?(.55+.35*Math.sin(now/1000*2*Math.PI/10)):0;
+  const ember=T.phase==='dozing'||T.phase==='asleep'?(.5+.3*idleBreath):T.phase==='night'?(.55+.35*Math.sin(now/1000*2*Math.PI/10)):0;
   for(let i=0;i<N;i++){
     const u=U[i],v=V_[i],r=R[i];
     // 1. background scene (with crossfade)
@@ -467,7 +477,7 @@ function renderTick(now,dt){
     if(T.phase==='goodnight'){for(const s of T.spots){const a=s.fade?1-clamp((now-s.fade)/3000,0,1):1;if(a>0){const k=.5*a*g2(u-s.u,v-s.v,.16);o[0]+=k;o[1]+=k*.58;o[2]+=k*.22}}
       if(T.eyes){const e=(now-T.eyes)/1000,open=sm(0,1,e)*(1-(sm(1.6,1.8,e)-sm(1.9,2.1,e)))*(1-sm(3.2,4.2,e)),k=.75*open*(g2(u-.13,v+.05,.07)+g2(u+.13,v+.05,.07));o[0]+=k;o[1]+=k*.65;o[2]+=k*.3}}
     // dozing / night-watch ember
-    if(ember>0){const k=ember*Math.exp(-r*r/.035);o[0]+=k;o[1]+=k*.38;o[2]+=k*.1}
+    if(ember>0){const k=ember*Math.exp(-r*r/(T.phase==='night'?.05:.12));o[0]+=k;o[1]+=k*.38;o[2]+=k*.1}
     // Glimmer's yawn
     o[0]*=yawnK;o[1]*=yawnK;o[2]*=yawnK;
     // warmify late in the night: no blue, no white
@@ -492,7 +502,8 @@ const Blanket=(function(){
     if(client)try{client.end(true)}catch(e){}
     topic='lully/'+code+'/frame';
     client=mqtt.connect('wss://broker.emqx.io:8084/mqtt',{clientId:'glimmer-'+Math.random().toString(16).slice(2,10),reconnectPeriod:2000,connectTimeout:8000});
-    client.on('connect',()=>{ok=true;label('Blanket: '+code+' ✓');try{client.publish(topic,new Uint8Array([115,112,1]))}catch(e){}});
+    client.on('connect',()=>{ok=true;label('Blanket: '+code+' · waiting for blanket…');client.subscribe('lully/'+code+'/status')});
+    client.on('message',(t,m)=>{if(t.endsWith('/status')){Diag.blanket=String(m)==='online';label(Diag.blanket?'Blanket: '+code+' ✓ online':'Blanket: '+code+' · blanket offline')}});
     client.on('close',()=>{ok=false;label('Blanket: reconnecting…')});
     client.on('error',()=>{ok=false;label('Blanket: relay error')});
   }
@@ -502,7 +513,7 @@ const Blanket=(function(){
     const c=prompt('Pairing code from the ESP32 setup page:',code||'lully-');if(!c)return;code=c.trim();try{localStorage.setItem('lullyBlanket',code)}catch(e){}connect();
   });
   if(code)connect();
-  function send(buf,now,every){if(!ok||now-lastSend<(every||100))return;lastSend=now;try{client.publish(topic,buf,{qos:0})}catch(e){}}
+  function send(buf,now,every){if(!ok||now-lastSend<(every||100))return;lastSend=now;try{client.publish(topic,buf,{qos:0});Diag.sent++}catch(e){}}
   return{send,on:()=>ok};
 })();
 
@@ -511,7 +522,7 @@ let lastTick=0;
 function loop(now){
   requestAnimationFrame(loop);
   if(now-lastTick<30)return;const dt=Math.min(.1,(now-(lastTick||now))/1000);lastTick=now;
-  voiceTick(dt,now);tideTick(dt,now);renderTick(now,dt);
+  voiceTick(dt,now);tideTick(dt,now);renderTick(now,dt);drawDiag(now);
   if(active())Blanket.send(frame,now,Tide.phase==='done'?2000:100);
 }
 requestAnimationFrame(loop);
@@ -533,6 +544,7 @@ $('go').addEventListener('click',async()=>{
     say(blocked?'Microphone access was blocked. Allow the microphone for this site in your browser settings (on iPhone Chrome: Settings → Chrome → Microphone), then tap Start again.':'Couldn’t start: '+(err&&err.message||err));
   }
 });
+document.addEventListener('touchend',()=>{if(ac&&ac.state!=='running')ac.resume().catch(()=>{})},{passive:true});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&running&&'wakeLock' in navigator&&!wakeLock)navigator.wakeLock.request('screen').then(w=>wakeLock=w).catch(()=>{})});
 
 // ---------------- Try it without reading ----------------
