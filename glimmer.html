@@ -64,7 +64,9 @@ a{color:var(--accent)}
   <label>Strip red <input type="range" id="gR" min="30" max="150" value="100"></label>
   <label>Strip green <input type="range" id="gG" min="30" max="150" value="100"></label>
   <label>Strip blue <input type="range" id="gB" min="30" max="150" value="100"></label>
-  <div class="note">These sliders only change the real strip, not the screen. Tap White, then slide until the strip looks white.</div>
+  <label>Green midtones <input type="range" id="eG" min="40" max="120" value="70"></label>
+  <label>Blue midtones <input type="range" id="eB" min="80" max="200" value="140"></label>
+  <div class="note">These sliders only change the real strip, not the screen. Tap White and slide the top three until the strip looks white. Then tap Orange and slide the midtones until it looks orange, not pink (green further left = more orange; blue further right = less pink).</div>
   <div class="note" id="privacy">Listening happens on this phone. The speech model (about 40 MB) downloads once. No audio is recorded or sent anywhere; only light colors go to the blanket.</div>
 </details>
 <p class="note" style="margin-top:14px">Lully Glimmer is the clean-slate version: it reacts to the reader's voice, magic words and the story's mood, and walks the child to sleep. The original Lully is <a href="./">here</a>. Both use the same blanket pairing code.</p>
@@ -88,7 +90,7 @@ const U=new Float32Array(N),V=new Float32Array(N),R=new Float32Array(N);
 for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;U[i]=(x+.5)/W*2-1;V[i]=(y+.5)/H*2-1;R[i]=Math.hypot(U[i],V[i])/Math.SQRT2}
 
 // ---------------- Settings ----------------
-const set={gR:100,gG:100,gB:100,name:'',stories:2,bright:100,quick:false,two:false};
+const set={gR:100,gG:100,gB:100,eG:70,eB:140,name:'',stories:2,bright:100,quick:false,two:false};
 try{Object.assign(set,JSON.parse(localStorage.getItem('glimmerSettings')||'{}'))}catch(e){}
 function saveSet(){try{localStorage.setItem('glimmerSettings',JSON.stringify(set))}catch(e){}}
 $('name').value=set.name;$('stories').value=String(set.stories);$('bright').value=set.bright;$('quick').checked=set.quick;$('two').checked=set.two;
@@ -97,7 +99,7 @@ $('stories').onchange=e=>{set.stories=+e.target.value;saveSet()};
 $('bright').oninput=e=>{set.bright=+e.target.value;saveSet()};
 $('quick').onchange=e=>{set.quick=e.target.checked;saveSet()};
 $('two').onchange=e=>{set.two=e.target.checked;saveSet()};
-['gR','gG','gB'].forEach(k=>{$(k).value=set[k];$(k).oninput=e=>{set[k]=+e.target.value;saveSet()}});
+['gR','gG','gB','eG','eB'].forEach(k=>{$(k).value=set[k];$(k).oninput=e=>{set[k]=+e.target.value;saveSet()}});
 let colorTest={until:0,c:[0,0,0]};
 [['Red',[255,0,0]],['Green',[0,255,0]],['Blue',[0,0,255]],['White',[255,255,255]],['Orange',[255,140,40]],['Stop',null]].forEach(([t,c])=>{
   const b=document.createElement('button');b.textContent=t;b.onclick=()=>{colorTest=c?{until:performance.now()+8000,c}:{until:0,c:[0,0,0]};if(!c)Blanket.send(new Uint8Array(N*3),performance.now(),0)};$('colorBtns').append(b)});
@@ -332,7 +334,7 @@ function moodWords(ws,now){moodDecay(now);let relief=0;
   const cur=Mood.scene==='sad'?Mood.sad:(Mood.scores[Mood.scene]||0);
   if(best!==Mood.scene&&bs>cur*1.3&&now-Mood.since>12000){Mood.prev=Mood.scene;Mood.scene=best;Mood.mix=0;Mood.since=now;showAccent('scene: '+best)}
 }
-const SCENE_COL={calm:[[1,.55,.3],[.95,.36,.48]],meadow:[[1,.72,.28],[.5,.8,.25]],day:[[1,.82,.5],[1,.62,.3]],night:[[.32,.1,.42],[.12,.1,.42]],
+const SCENE_COL={calm:[[1,.55,.25],[1,.4,.16]],meadow:[[1,.72,.28],[.5,.8,.25]],day:[[1,.82,.5],[1,.62,.3]],night:[[.32,.1,.42],[.12,.1,.42]],
   water:[[.06,.42,.55],[.45,.85,.88]],forest:[[.16,.45,.16],[1,.75,.3]],winter:[[.7,.82,1],[.95,.9,.98]],home:[[1,.42,.1],[1,.62,.25]],sad:[[.45,.3,.75],[.3,.25,.6]]};
 function scene(name,i,u,v,r,t,o){
   const c=SCENE_COL[name],A=c[0],B=c[1];let k=0,s=.35;
@@ -533,10 +535,11 @@ function loop(now){
   requestAnimationFrame(loop);
   if(now-lastTick<30)return;const dt=Math.min(.1,(now-(lastTick||now))/1000);lastTick=now;
   voiceTick(dt,now);tideTick(dt,now);renderTick(now,dt);drawDiag(now);
-  const out=sendBuf,g=[set.gR/100,set.gG/100,set.gB/100];
-  if(now<colorTest.until){for(let i=0;i<N*3;i++)out[i]=Math.min(255,colorTest.c[i%3]*g[i%3]*.6);Blanket.send(out,now,100);
+  const out=sendBuf,g=[set.gR/100,set.gG/100,set.gB/100],ex=[1,set.eG/100,set.eB/100];
+  const strip=(v,c)=>{v=Math.min(255,v*g[c]);return 255*Math.pow(v/255,ex[c])};
+  if(now<colorTest.until){for(let i=0;i<N*3;i++)out[i]=strip(colorTest.c[i%3]*.6,i%3);Blanket.send(out,now,100);
     for(let i=0;i<N;i++){img.data[i*4]=colorTest.c[0];img.data[i*4+1]=colorTest.c[1];img.data[i*4+2]=colorTest.c[2]}ctx.putImageData(img,0,0);return}
-  if(active()){for(let i=0;i<N*3;i++)out[i]=Math.min(255,frame[i]*g[i%3]);Blanket.send(out,now,Tide.phase==='done'?2000:100)}
+  if(active()){for(let i=0;i<N*3;i++)out[i]=strip(frame[i],i%3);Blanket.send(out,now,Tide.phase==='done'?2000:100)}
 }
 requestAnimationFrame(loop);
 
