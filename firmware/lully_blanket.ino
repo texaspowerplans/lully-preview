@@ -10,7 +10,7 @@
     2. Library Manager: install "FastLED" (by Daniel Garcia), "WiFiManager" (by tzapu), "PubSubClient" (by Nick O'Leary).
     3. Plug in the ESP32 with a USB data cable, pick its port, click Upload.
 
-  First power-up (or hold BOOT while pressing EN to start over): the board opens a Wi-Fi network called "Lully-setup" (password: lullylight). Join it from your phone, pick your
+  First power-up, or when the saved Wi-Fi isn't found (or after holding BOOT for 3 s while it runs): the board opens a Wi-Fi network called "Lully-setup" (password: lullylight). Join it from your phone, pick your
   home Wi-Fi, and note the pairing code shown there (you can change it). Type the same code into the
   app's "Blanket" button.
 */
@@ -108,8 +108,8 @@ void setup() {
   saved.toCharArray(code, sizeof(code));
 
   WiFiManager wm;
-  pinMode(0, INPUT_PULLUP);                // hold BOOT while pressing EN to forget Wi-Fi and reopen Lully-setup
-  if (digitalRead(0) == LOW) { Serial.println("BOOT held: forgetting Wi-Fi"); wm.resetSettings(); fill_solid(leds, NUM_LEDS, CRGB(0, 0, 40)); FastLED.show(); delay(1500); }
+  pinMode(0, INPUT_PULLUP);                // BOOT button: hold 3 s any time while running to forget Wi-Fi (see loop)
+  wm.setConnectTimeout(20);                // if the saved Wi-Fi isn't around, open Lully-setup after 20 s
   WiFiManagerParameter pcode("code", "Pairing code (type this into the app)", code, 32);
   wm.addParameter(&pcode);
   wm.setConfigPortalTimeout(300);
@@ -127,6 +127,16 @@ void setup() {
 }
 
 void loop() {
+  // hold BOOT for 3 seconds (while running, NOT while tapping EN) to forget Wi-Fi and reopen Lully-setup
+  static uint32_t bootDown = 0;
+  if (digitalRead(0) == LOW) {
+    if (!bootDown) bootDown = millis();
+    if (millis() - bootDown > 3000) {
+      Serial.println("BOOT held 3 s: forgetting Wi-Fi");
+      fill_solid(leds, NUM_LEDS, CRGB(0, 0, 60)); FastLED.show();
+      WiFiManager wm; wm.resetSettings(); delay(1500); ESP.restart();
+    }
+  } else bootDown = 0;
   static uint32_t lastInfo = 0;
   if (millis() - lastInfo > 10000) { lastInfo = millis(); Serial.printf("Pairing code: %s  (relay %s)\n", code, mqtt.connected() ? "connected" : "not connected"); }
   if (!mqtt.connected()) connectMqtt();
