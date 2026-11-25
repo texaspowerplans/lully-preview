@@ -29,6 +29,7 @@
 // check: ROWS*COLS + (ROWS-1)*TURN_LEDS must be <= STRIPS*160   (10*14 + 9*2 = 158  OK)
 #define SERPENTINE   true      // rows alternate direction (zigzag fold)
 #define MAX_MILLIAMPS (STRIPS * 1000)  // power limit for the whole setup (one strip: 1 A)
+#define COLOR_ORDER  RGB       // if the strip shows green where the app shows orange/red, swap between RGB and GRB
 #define MAX_BRIGHT   140       // 0-255 overall ceiling; it's under fabric, this is plenty
 // ----------------------------------
 
@@ -101,7 +102,7 @@ void connectMqtt() {
 void setup() {
   Serial.begin(115200);
   for (int i = 0; i < 256; i++) gammaT[i] = (uint8_t)(pow(i / 255.0, 2.0) * 255 + 0.5);
-  FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
+  FastLED.addLeds<WS2812B, DATA_PIN, COLOR_ORDER>(leds, NUM_LEDS);
   FastLED.setMaxPowerInVoltsAndMilliamps(5, MAX_MILLIAMPS);
   FastLED.setBrightness(bright);
   statusColor(CRGB(0, 0, 30));            // dim BLUE = looking for Wi-Fi
