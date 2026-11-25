@@ -57,6 +57,7 @@ a{color:var(--accent)}
   <label>Child's name <input type="text" id="name" placeholder="optional" autocomplete="off"></label>
   <label>Stories tonight <select id="stories"><option>1</option><option selected>2</option><option>3</option></select></label>
   <label>Brightness <input type="range" id="bright" min="20" max="100" value="100"></label>
+  <label>Background <span id="bgPct" style="min-width:3em;text-align:right;color:var(--quiet)">100%</span><input type="range" id="bgAmt" min="0" max="100" value="100"></label>
   <label>Quick demo (a whole night in about 4 min) <input type="checkbox" id="quick"></label>
   <label>Two readers taking turns <input type="checkbox" id="two"></label>
   <div class="note" style="padding-top:8px">Strip color check: each button lights the whole strip in one color for 8 seconds.</div>
@@ -90,13 +91,15 @@ const U=new Float32Array(N),V=new Float32Array(N),R=new Float32Array(N);
 for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;U[i]=(x+.5)/W*2-1;V[i]=(y+.5)/H*2-1;R[i]=Math.hypot(U[i],V[i])/Math.SQRT2}
 
 // ---------------- Settings ----------------
-const set={gR:100,gG:100,gB:100,eG:70,eB:140,name:'',stories:2,bright:100,quick:false,two:false};
+const set={bg:100,gR:100,gG:100,gB:100,eG:70,eB:140,name:'',stories:2,bright:100,quick:false,two:false};
 try{Object.assign(set,JSON.parse(localStorage.getItem('glimmerSettings')||'{}'))}catch(e){}
 function saveSet(){try{localStorage.setItem('glimmerSettings',JSON.stringify(set))}catch(e){}}
 $('name').value=set.name;$('stories').value=String(set.stories);$('bright').value=set.bright;$('quick').checked=set.quick;$('two').checked=set.two;
 $('name').oninput=e=>{set.name=e.target.value.trim().toLowerCase();saveSet()};
 $('stories').onchange=e=>{set.stories=+e.target.value;saveSet()};
 $('bright').oninput=e=>{set.bright=+e.target.value;saveSet()};
+$('bgAmt').value=set.bg;$('bgPct').textContent=set.bg+'%';
+$('bgAmt').oninput=e=>{set.bg=+e.target.value;$('bgPct').textContent=set.bg+'%';saveSet()};
 $('quick').onchange=e=>{set.quick=e.target.checked;saveSet()};
 $('two').onchange=e=>{set.two=e.target.checked;saveSet()};
 ['gR','gG','gB','eG','eB'].forEach(k=>{$(k).value=set[k];$(k).oninput=e=>{set[k]=+e.target.value;saveSet()}});
@@ -470,8 +473,8 @@ function renderTick(now,dt){
   for(let i=0;i<N;i++){
     const u=U[i],v=V_[i],r=R[i];
     // 1. background scene (with crossfade)
-    if(T.bgK>.001){scene(Mood.scene,i,u,v,r,sceneT,o);if(Mood.mix<1){scene(Mood.prev,i,u,v,r,sceneT,o2);const m=sq(Mood.mix);o[0]=lerp(o2[0],o[0],m);o[1]=lerp(o2[1],o[1],m);o[2]=lerp(o2[2],o[2],m)}
-      o[0]*=T.bgK;o[1]*=T.bgK;o[2]*=T.bgK}else{o[0]=o[1]=o[2]=0}
+    if(T.bgK>.001&&set.bg>0){scene(Mood.scene,i,u,v,r,sceneT,o);if(Mood.mix<1){scene(Mood.prev,i,u,v,r,sceneT,o2);const m=sq(Mood.mix);o[0]=lerp(o2[0],o[0],m);o[1]=lerp(o2[1],o[1],m);o[2]=lerp(o2[2],o[2],m)}
+      const bk=T.bgK*set.bg/100;o[0]*=bk;o[1]*=bk;o[2]*=bk}else{o[0]=o[1]=o[2]=0}
     // 2. brave light: the far edges dim, a warm steady pool gathers around the child
     if(tau>.01){const d=1-.6*tau*sm(.25,.95,r),pool=.55*tau*Math.exp(-r*r/.14);o[0]=o[0]*d+pool;o[1]=o[1]*d+pool*.55;o[2]=o[2]*d+pool*.2}
     // persistent stars
