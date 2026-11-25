@@ -59,6 +59,12 @@ a{color:var(--accent)}
   <label>Brightness <input type="range" id="bright" min="20" max="100" value="100"></label>
   <label>Quick demo (a whole night in about 4 min) <input type="checkbox" id="quick"></label>
   <label>Two readers taking turns <input type="checkbox" id="two"></label>
+  <div class="note" style="padding-top:8px">Strip color check: each button lights the whole strip in one color for 8 seconds.</div>
+  <div class="try" id="colorBtns"></div>
+  <label>Strip red <input type="range" id="gR" min="30" max="150" value="100"></label>
+  <label>Strip green <input type="range" id="gG" min="30" max="150" value="100"></label>
+  <label>Strip blue <input type="range" id="gB" min="30" max="150" value="100"></label>
+  <div class="note">These sliders only change the real strip, not the screen. Tap White, then slide until the strip looks white.</div>
   <div class="note" id="privacy">Listening happens on this phone. The speech model (about 40 MB) downloads once. No audio is recorded or sent anywhere; only light colors go to the blanket.</div>
 </details>
 <p class="note" style="margin-top:14px">Lully Glimmer is the clean-slate version: it reacts to the reader's voice, magic words and the story's mood, and walks the child to sleep. The original Lully is <a href="./">here</a>. Both use the same blanket pairing code.</p>
@@ -82,7 +88,7 @@ const U=new Float32Array(N),V=new Float32Array(N),R=new Float32Array(N);
 for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;U[i]=(x+.5)/W*2-1;V[i]=(y+.5)/H*2-1;R[i]=Math.hypot(U[i],V[i])/Math.SQRT2}
 
 // ---------------- Settings ----------------
-const set={name:'',stories:2,bright:100,quick:false,two:false};
+const set={gR:100,gG:100,gB:100,name:'',stories:2,bright:100,quick:false,two:false};
 try{Object.assign(set,JSON.parse(localStorage.getItem('glimmerSettings')||'{}'))}catch(e){}
 function saveSet(){try{localStorage.setItem('glimmerSettings',JSON.stringify(set))}catch(e){}}
 $('name').value=set.name;$('stories').value=String(set.stories);$('bright').value=set.bright;$('quick').checked=set.quick;$('two').checked=set.two;
@@ -91,6 +97,10 @@ $('stories').onchange=e=>{set.stories=+e.target.value;saveSet()};
 $('bright').oninput=e=>{set.bright=+e.target.value;saveSet()};
 $('quick').onchange=e=>{set.quick=e.target.checked;saveSet()};
 $('two').onchange=e=>{set.two=e.target.checked;saveSet()};
+['gR','gG','gB'].forEach(k=>{$(k).value=set[k];$(k).oninput=e=>{set[k]=+e.target.value;saveSet()}});
+let colorTest={until:0,c:[0,0,0]};
+[['Red',[255,0,0]],['Green',[0,255,0]],['Blue',[0,0,255]],['White',[255,255,255]],['Orange',[255,140,40]],['Stop',null]].forEach(([t,c])=>{
+  const b=document.createElement('button');b.textContent=t;b.onclick=()=>{colorTest=c?{until:performance.now()+8000,c}:{until:0,c:[0,0,0]};if(!c)Blanket.send(new Uint8Array(N*3),performance.now(),0)};$('colorBtns').append(b)});
 const Q=()=>set.quick?0.12:1;   // time scale for the Sleep Tide
 
 // ---------------- UI helpers ----------------
@@ -518,12 +528,15 @@ const Blanket=(function(){
 })();
 
 // ---------------- Main loop ----------------
-let lastTick=0;
+let lastTick=0;const sendBuf=new Uint8Array(N*3);
 function loop(now){
   requestAnimationFrame(loop);
   if(now-lastTick<30)return;const dt=Math.min(.1,(now-(lastTick||now))/1000);lastTick=now;
   voiceTick(dt,now);tideTick(dt,now);renderTick(now,dt);drawDiag(now);
-  if(active())Blanket.send(frame,now,Tide.phase==='done'?2000:100);
+  const out=sendBuf,g=[set.gR/100,set.gG/100,set.gB/100];
+  if(now<colorTest.until){for(let i=0;i<N*3;i++)out[i]=Math.min(255,colorTest.c[i%3]*g[i%3]*.6);Blanket.send(out,now,100);
+    for(let i=0;i<N;i++){img.data[i*4]=colorTest.c[0];img.data[i*4+1]=colorTest.c[1];img.data[i*4+2]=colorTest.c[2]}ctx.putImageData(img,0,0);return}
+  if(active()){for(let i=0;i<N*3;i++)out[i]=Math.min(255,frame[i]*g[i%3]);Blanket.send(out,now,Tide.phase==='done'?2000:100)}
 }
 requestAnimationFrame(loop);
 
